@@ -26,3 +26,6 @@ MILCOM/
 *.log
 *.out
 *.synctex.gz
+
+# Local code-review working notes
+TODO-code-review.txt

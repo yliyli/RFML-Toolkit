@@ -1,0 +1,21 @@
+Title: RFML in a Box - An Open-Source Toolkit from Waveform Synthesis to Trained Model
+
+Description of Project: Radio-frequency machine learning (RFML) lets a receiver decide what is on the air - a Wi-Fi frame, a radar chirp, an unauthorized emitter - directly from raw I/Q samples. Today every study rebuilds the same plumbing: separate scripts to synthesize waveforms, apply a channel, assemble a training set, and train a model. Our group has a working prototype that unifies all of this in one desktop application: thirteen waveform families, four interchangeable channel models (configurable impairments, stochastic fading, NVIDIA Sionna ray tracing over imported 3-D scenes, and banks of measured channel responses), dataset management that keeps metadata attached to every example, and PyTorch training and inference. This project will develop the breadth and hardening needed to make the toolkit something the wider community can build on:
+
+- Broaden the front end: Add waveform families the toolkit does not cover (Bluetooth/BLE, ADS-B, GNSS, GSM/GMSK, DVB-S2, more radar modes), extend the standards-based generators beyond their one fixed configuration, and accept far more user data - SigMF recordings, HDF5, and live capture from a software-defined radio.
+
+- Grow the digital twin: Build new Sionna/Blender scenes for sites we care about around Austin, and add batch channel generation - sweep transmitter and receiver placements, antenna arrays, and materials across a scene to produce thousands of channel realizations in one queued job instead of one at a time.
+
+- Open up the model zoo: Add stronger architectures (transformers, complex-valued CNNs, TorchSig-style baselines) and a "bring your own model" path, where a student drops in a PyTorch file and the toolkit checks its shapes, runs it against a reference dataset, and reports where it fails.
+
+- Harden, validate, and release: Build the regression test suite the prototype lacks, check the Python waveform generator against its MATLAB reference, make every run reproducible from a recorded seed, and ship a clean installable package with tutorials and example notebooks.
+
+- Engage the community: Write the documentation, respond to issues, and gather feedback from the research groups who will actually use the tool - the part of open-source work that is rarely taught and always needed.
+
+The tools you will learn and use: In this project, we will use and learn Python, PyTorch, NVIDIA Sionna and Sionna RT, MATLAB's communications toolboxes, Blender and OpenStreetMap for scene building, PySide6, and modern software packaging and continuous integration.
+
+The skills you should have: Solid Python and comfort with Git and collaborative development are needed. Experience with PyTorch, GUI work, and fundamentals of wireless communications (modulation, multipath, fading) are each a big plus. Curiosity matters more here than prior RF expertise.
+
+Potential Outcomes: A widely usable open-source release, an accompanying tool and dataset paper, and a strong visual demo. The toolkit is already public, so your contributions will be visible and used by other groups.
+
+Group: You will be working with Prof. Kaushik Chowdhury and his group.
