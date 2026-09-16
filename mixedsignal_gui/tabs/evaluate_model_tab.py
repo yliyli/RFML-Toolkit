@@ -557,7 +557,7 @@ class EvaluateModelTab(QWidget):
 
     def _do_load_model(self, filepath):
         try:
-            from mixedsignal_gui.backend.torch_models import get_model
+            from mixedsignal_gui.backend.torch_models import get_model, external_plugin_path
 
             meta = self._load_metadata(filepath)
             self.model_metadata = meta
@@ -580,6 +580,8 @@ class EvaluateModelTab(QWidget):
                 in_channels = 1
                 hparams = {}
 
+            plugin_path = external_plugin_path(filepath, meta)
+
             # Get current device setting
             device = self.get_device()
 
@@ -590,6 +592,7 @@ class EvaluateModelTab(QWidget):
                 num_classes=num_classes,
                 input_size=signal_length,
                 in_channels=in_channels,
+                plugin_path=plugin_path,
                 **hparams,
             )
             model.load_state_dict(state_dict)

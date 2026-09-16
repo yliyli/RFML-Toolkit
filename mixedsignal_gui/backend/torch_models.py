@@ -1,5 +1,67 @@
+import hashlib
+import importlib.util
+import inspect
+from pathlib import Path
+
 import torch
 import torch.nn as nn
+
+
+EXTERNAL_MODEL_NAME = "External PyTorch Model"
+
+
+def _load_plugin_module(plugin_path):
+    """Load a trusted external model module from a Python source file."""
+    path = Path(plugin_path).expanduser().resolve()
+    if not path.is_file():
+        raise FileNotFoundError(f"Model plugin not found: {path}")
+    module_id = hashlib.sha256(str(path).encode()).hexdigest()[:12]
+    spec = importlib.util.spec_from_file_location(f"rfml_plugin_{module_id}", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load model plugin: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module, path
+
+
+def inspect_external_model(plugin_path):
+    """Validate the public contract of an external PyTorch model file."""
+    module, path = _load_plugin_module(plugin_path)
+    if not callable(getattr(module, "build_model", None)):
+        raise ValueError("External model must define build_model(num_classes, input_size, in_channels, **kwargs).")
+    class_names = [name for name, value in vars(module).items()
+                   if inspect.isclass(value) and issubclass(value, nn.Module) and value is not nn.Module]
+    return {
+        "path": str(path),
+        "name": str(getattr(module, "MODEL_NAME", class_names[0] if class_names else path.stem)),
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+    }
+
+
+def build_external_model(plugin_path, *, num_classes=2, input_size=256, in_channels=1, **kwargs):
+    module, _ = _load_plugin_module(plugin_path)
+    factory = getattr(module, "build_model", None)
+    if not callable(factory):
+        raise ValueError("External model must define build_model(num_classes, input_size, in_channels, **kwargs).")
+    model = factory(num_classes=num_classes, input_size=input_size, in_channels=in_channels, **kwargs)
+    if not isinstance(model, nn.Module):
+        raise TypeError("build_model must return a torch.nn.Module.")
+    return model
+
+
+def external_plugin_path(checkpoint_path, metadata):
+    """Resolve and integrity-check a plugin copied next to a checkpoint."""
+    plugin = (metadata or {}).get("model_plugin") or {}
+    filename = plugin.get("filename")
+    if not filename:
+        return None
+    path = Path(checkpoint_path).resolve().parent / filename
+    if not path.is_file():
+        raise FileNotFoundError(f"Saved model plugin is missing: {path}")
+    expected_hash = plugin.get("sha256")
+    if expected_hash and hashlib.sha256(path.read_bytes()).hexdigest() != expected_hash:
+        raise ValueError(f"Saved model plugin has changed: {path}")
+    return str(path)
 
 
 class SimpleCNN(nn.Module):
@@ -151,6 +213,11 @@ class ResNet1DOptimized(nn.Module):
 
 
 def get_model(name, num_classes=2, input_size=256, in_channels=1, **kwargs):
+    plugin_path = kwargs.pop("plugin_path", None)
+    if name == EXTERNAL_MODEL_NAME or plugin_path:
+        if not plugin_path:
+            raise ValueError("An external model requires a plugin_path.")
+        return build_external_model(plugin_path, num_classes=num_classes, input_size=input_size, in_channels=in_channels, **kwargs)
     """Return a PyTorch model by name.
 
     Args:

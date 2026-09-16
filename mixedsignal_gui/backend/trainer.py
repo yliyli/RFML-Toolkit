@@ -5,6 +5,7 @@ import time
 import json
 import traceback
 import concurrent.futures
+import shutil
 
 import torch
 import torch.nn as nn
@@ -12,7 +13,7 @@ import torch.optim as optim
 from torch.amp import GradScaler, autocast
 from torch.utils.data import TensorDataset, DataLoader
 
-from .torch_models import get_model
+from .torch_models import get_model, inspect_external_model
 
 # Models that expect 2-channel IQ input
 IQ_MODELS = {'ResNet1DOptimized'}
@@ -62,7 +63,7 @@ class TrainerThread(QThread):
     def __init__(self, file_label_pairs, labels, model_name='SimpleCNN', epochs=10,
                  batch_size=32, lr=0.001, val_split=0.2,
                  weight_decay=1e-4, label_smoothing=0.1, grad_clip=1.0,
-                 model_hparams=None, save_dir=None, device='cpu'):
+                 model_hparams=None, model_plugin_path=None, save_dir=None, device='cpu'):
         super().__init__()
         self.file_label_pairs = list(file_label_pairs)
         self.labels = list(labels)
@@ -75,6 +76,8 @@ class TrainerThread(QThread):
         self.label_smoothing = float(label_smoothing)
         self.grad_clip = float(grad_clip)
         self.model_hparams = model_hparams or {}
+        self.model_plugin_path = model_plugin_path
+        self.model_plugin = inspect_external_model(model_plugin_path) if model_plugin_path else None
         self.save_dir = save_dir
         
         # Use provided device parameter instead of auto-detecting
@@ -296,7 +299,7 @@ class TrainerThread(QThread):
         num_classes = len(self.labels)
         signal_len = X.shape[2]  # length after channel split
         model = get_model(self.model_name, num_classes=num_classes, input_size=signal_len,
-                          in_channels=input_channels, **self.model_hparams)
+                          in_channels=input_channels, plugin_path=self.model_plugin_path, **self.model_hparams)
         model.to(self.device)
 
         # Loss and optimizer
@@ -422,6 +425,12 @@ class TrainerThread(QThread):
         meta_path = os.path.join(out_dir, f"{self.model_name}_{timestamp}.json")
         try:
             torch.save(model.state_dict(), save_path)
+            if self.model_plugin:
+                plugin_filename = f"{self.model_name}_{timestamp}_plugin.py"
+                shutil.copy2(self.model_plugin["path"], os.path.join(out_dir, plugin_filename))
+                saved_plugin = {"filename": plugin_filename, "name": self.model_plugin["name"], "sha256": self.model_plugin["sha256"]}
+            else:
+                saved_plugin = None
             # Save companion metadata
             # Record where the training data came from.  Without this a saved
             # model is indistinguishable from any other with the same shape, so
@@ -442,6 +451,7 @@ class TrainerThread(QThread):
                 # could never be loaded again — it failed with dozens of size
                 # mismatches inside load_state_dict.
                 "model_hparams": dict(self.model_hparams),
+                "model_plugin": saved_plugin,
                 "timestamp": timestamp,
                 "training_data_root": common_root,
                 "training_class_dirs": source_dirs,

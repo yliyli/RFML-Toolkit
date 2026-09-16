@@ -306,7 +306,7 @@ class InferenceResultsTab(QWidget):
     def _load_model(self, filepath: str, num_classes: int = 2):
         """Load model weights, read metadata, update UI."""
         try:
-            from mixedsignal_gui.backend.torch_models import get_model
+            from mixedsignal_gui.backend.torch_models import get_model, external_plugin_path
 
             device = self._device()
 
@@ -336,6 +336,8 @@ class InferenceResultsTab(QWidget):
                 except Exception as exc:
                     print(f"[InferenceTab] Warning reading metadata: {exc}")
 
+            plugin_path = external_plugin_path(filepath, self.model_metadata)
+
             try:
                 state_dict = torch.load(filepath, map_location=device, weights_only=True)
             except TypeError:
@@ -346,6 +348,7 @@ class InferenceResultsTab(QWidget):
                 num_classes=num_classes,
                 input_size=signal_length or 256,
                 in_channels=in_channels,
+                plugin_path=plugin_path,
                 **hparams,
             )
             self.model.load_state_dict(state_dict)

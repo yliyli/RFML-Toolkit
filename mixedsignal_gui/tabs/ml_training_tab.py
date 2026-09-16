@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                QPushButton, QComboBox, QGridLayout, QFrame, QProgressBar, QFileDialog,
                                QListWidget, QListWidgetItem, QDoubleSpinBox, QScrollArea,
-                               QCheckBox, QMessageBox,
+                               QCheckBox, QMessageBox, QToolButton,
                                QSpinBox, QLineEdit)
 from PySide6.QtCore import Qt, Signal, QSettings
 
@@ -21,6 +21,7 @@ class MLTrainingTab(QWidget):
     def __init__(self, dataset_manager=None):
         super().__init__()
         self.dataset_manager = dataset_manager
+        self.external_model_plugins = {}
 
         self.setup_ui()
         install_wheel_blocker(self)
@@ -100,7 +101,17 @@ class MLTrainingTab(QWidget):
         layout.addWidget(arch_label)
         self.model_combo = QComboBox()
         self.model_combo.addItems(["SimpleCNN", "TinyConv", "MLP", "ResNet1DOptimized"])
-        layout.addWidget(self.model_combo)
+        arch_row = QHBoxLayout()
+        arch_row.addWidget(self.model_combo, 1)
+        self.load_model_plugin_btn = QPushButton("Load Python…")
+        self.load_model_plugin_btn.clicked.connect(self._choose_model_plugin)
+        arch_row.addWidget(self.load_model_plugin_btn)
+        self.model_plugin_help_btn = QToolButton()
+        self.model_plugin_help_btn.setText("?")
+        self.model_plugin_help_btn.setToolTip("Custom PyTorch model requirements")
+        self.model_plugin_help_btn.clicked.connect(self._show_model_plugin_help)
+        arch_row.addWidget(self.model_plugin_help_btn)
+        layout.addLayout(arch_row)
 
         # ── Model save path ────────────────────────────────────────────────
         save_row = QHBoxLayout()
@@ -633,6 +644,32 @@ class MLTrainingTab(QWidget):
 
     # ── Training ───────────────────────────────────────────────────────────
 
+    def _show_model_plugin_help(self):
+        QMessageBox.information(
+            self, "Custom PyTorch model",
+            "Select a trusted Python file that defines\n\n"
+            "build_model(num_classes, input_size, in_channels, **kwargs)\n\n"
+            "The function must return a torch.nn.Module whose forward method "
+            "returns unnormalized class logits. The model receives tensors shaped "
+            "(batch, in_channels, input_size).")
+
+    def _choose_model_plugin(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Select PyTorch model", "", "Python files (*.py)")
+        if not path:
+            return
+        try:
+            from mixedsignal_gui.backend.torch_models import inspect_external_model
+            info = inspect_external_model(path)
+        except Exception as exc:
+            QMessageBox.warning(self, "Invalid model plugin", str(exc))
+            return
+        display_name = f"Custom: {info["name"]}"
+        if display_name not in self.external_model_plugins:
+            self.model_combo.addItem(display_name)
+        self.external_model_plugins[display_name] = info
+        self.model_combo.setCurrentText(display_name)
+        self.status_label.setText(f"Loaded custom model: {info["name"]}")
+
     def start_training(self):
         """Handle training start button click"""
         try:
@@ -671,6 +708,7 @@ class MLTrainingTab(QWidget):
         self.val_labels["Validation Samples"].setText(f"{val_count:,}")
 
         model_name = self.model_combo.currentText()
+        plugin = self.external_model_plugins.get(model_name)
         epochs = int(self.epochs_spin.value())
         batch_size = int(self.batch_spin.value())
 
@@ -705,6 +743,7 @@ class MLTrainingTab(QWidget):
             lr=lr, val_split=val_split,
             weight_decay=weight_decay, label_smoothing=label_smoothing,
             grad_clip=grad_clip, model_hparams=model_hparams,
+            model_plugin_path=plugin["path"] if plugin else None,
             save_dir=save_dir,
             device=device,
         )
