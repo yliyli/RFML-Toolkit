@@ -139,11 +139,25 @@ class WaveformConfig:
         """
         from fractions import Fraction
         v = self.sps_exact
-        frac = Fraction(v).limit_denominator(1000)
-        if abs(float(frac) - v) > 1e-12 * abs(v):
-            finer = Fraction(v).limit_denominator(10_000)
-            if finer.numerator <= self._MAX_UPSAMPLE:
-                frac = finer
+        if v > self._MAX_UPSAMPLE:
+            raise ValueError(
+                f"fs x Tsymb = {v:g} requires more than "
+                f"{self._MAX_UPSAMPLE:,} samples per symbol.")
+
+        desired_denominator = 1_000
+        coarse = Fraction(v).limit_denominator(desired_denominator)
+        if abs(float(coarse) - v) > 1e-12 * abs(v):
+            desired_denominator = 10_000
+
+        frac = Fraction(v).limit_denominator(desired_denominator)
+        if frac.numerator > self._MAX_UPSAMPLE:
+            # Numerator grows approximately as v * denominator. Select the
+            # finest denominator that cannot exceed the resource cap.
+            bounded_denominator = max(1, int(self._MAX_UPSAMPLE // v))
+            frac = Fraction(v).limit_denominator(bounded_denominator)
+            while frac.numerator > self._MAX_UPSAMPLE and bounded_denominator > 1:
+                bounded_denominator -= 1
+                frac = Fraction(v).limit_denominator(bounded_denominator)
         return frac.numerator, frac.denominator
 
     @property
