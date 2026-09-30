@@ -155,6 +155,16 @@ class TrainerThread(QThread):
         return X_iq / scale
 
     def run(self):
+        """Run training and always notify the UI of an unrecoverable failure."""
+        try:
+            self._run()
+        except Exception as exc:
+            self.error = f"{type(exc).__name__}: {exc}"
+            print(f"Training setup failed: {self.error}")
+            traceback.print_exc()
+            self.finished.emit("")
+
+    def _run(self):
         if not self.file_label_pairs:
             self.finished.emit("")
             return

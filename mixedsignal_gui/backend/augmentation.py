@@ -180,8 +180,10 @@ class FrequencyShift(AugmentationBlock):
         if np.iscomplexobj(signal):
             return (signal * shift).astype(signal.dtype)
         else:
-            # Real passband: frequency shift is a mixer (cosine multiplication)
-            return (signal * np.cos(2 * np.pi * self.delta_f * t)).astype(signal.dtype)
+            # Shift the analytic representation; cosine mixing would create an
+            # unwanted image at the sum and difference frequencies.
+            analytic = hilbert(signal.astype(np.float64), axis=-1)
+            return np.real(analytic * shift).astype(signal.dtype)
 
     def __repr__(self) -> str:
         return f"FrequencyShift(delta_f={self.delta_f:.1f} Hz)"
