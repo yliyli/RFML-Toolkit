@@ -815,7 +815,7 @@ class EvaluateModelTab(QWidget):
                 'channel' updates the Channel Test tab.
         """
         from mixedsignal_gui.backend.trainer import TrainerThread, pack_multichannel
-        target_len = TrainerThread.TARGET_LENGTH
+        target_len = int((self.model_metadata or {}).get('signal_length') or TrainerThread.TARGET_LENGTH)
 
         # A multi-antenna capture is packed the same way the trainer packed it,
         # rather than flattened — flattening kept only antenna 0 and then read
