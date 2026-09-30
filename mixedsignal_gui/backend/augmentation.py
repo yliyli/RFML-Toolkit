@@ -4,7 +4,8 @@ RF Signal Augmentation Pipeline for Machine Learning
 
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Tuple
-from scipy.signal import hilbert
+from fractions import Fraction
+from scipy.signal import hilbert, resample_poly
 import copy
 import os
 
@@ -417,8 +418,12 @@ class SionnaRTAugmentation(AugmentationBlock):
         p_lin = 10.0 ** ((tx_power_dbm - 30.0) / 10.0)
         x = x * np.sqrt(p_lin)
 
-        # Pad or trim to waveform_length
-        T = int(self.config.get("waveform_length", 1024))
+        # Preserve every input sample. A shorter configured length used to
+        # silently truncate data and create a length-based class cue.
+        requested_T = self.config.get("waveform_length")
+        T = len(x) if requested_T is None else max(len(x), int(requested_T))
+        if requested_T is not None and int(requested_T) < len(x):
+            print(f"Sionna RT requested {requested_T} samples for a {len(x)}-sample waveform; preserving the full waveform.")
         if len(x) < T:
             if "Zero Padded" in str(self.config.get("zero_padding", "Zero Padded")):
                 x = np.pad(x, (0, T - len(x)), mode="constant", constant_values=0)
@@ -510,8 +515,27 @@ class MeasuredChannelAugmentation(AugmentationBlock):
         self.snr_db = snr_db
         self.seed = seed
 
+    def _taps_at_waveform_rate(self, fs: float) -> np.ndarray:
+        """Resample a measured CIR so each tap has the correct physical delay."""
+        taps = np.asarray(self.channel.taps, dtype=np.complex128)
+        source_fs = self.channel.fs
+        self._last_waveform_fs = float(fs)
+        self._last_resample_ratio = (1, 1)
+
+        if source_fs is None or np.isclose(source_fs, fs, rtol=1e-9, atol=0.0):
+            return taps
+        if source_fs <= 0 or fs <= 0:
+            raise ValueError("Measured-channel and waveform sample rates must be positive.")
+
+        ratio = Fraction(float(fs) / float(source_fs)).limit_denominator(10_000)
+        self._last_resample_ratio = (ratio.numerator, ratio.denominator)
+        return resample_poly(taps, ratio.numerator, ratio.denominator)
+
     def apply(self, signal: np.ndarray, fs: float, **_kwargs) -> np.ndarray:
-        taps = self.channel.normalized() if self.normalize else self.channel.taps
+        taps = self._taps_at_waveform_rate(fs)
+        if self.normalize:
+            energy = np.sqrt(np.sum(np.abs(taps) ** 2))
+            taps = taps / energy if energy > 0 else taps
         if taps.size == 0:
             return signal.copy()
 
@@ -537,6 +561,8 @@ class MeasuredChannelAugmentation(AugmentationBlock):
             "num_taps": int(self.channel.num_taps),
             "rms_delay_spread_samples": float(self.channel.delay_spread_samples),
             "channel_fs": self.channel.fs,
+            "waveform_fs": getattr(self, "_last_waveform_fs", None),
+            "resample_ratio": list(getattr(self, "_last_resample_ratio", (1, 1))),
             "normalize": bool(self.normalize),
             "snr_db": self.snr_db,
             "seed": self.seed,
