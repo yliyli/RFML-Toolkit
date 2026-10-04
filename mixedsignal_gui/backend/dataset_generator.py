@@ -1,6 +1,7 @@
 from PySide6.QtCore import QThread, Signal
 import numpy as np
 import os
+from .experiment_settings import experiment_seed
 
 
 class DatasetGeneratorThread(QThread):
@@ -34,6 +35,8 @@ class DatasetGeneratorThread(QThread):
         self.waveform_params = waveform_params or {}
         self.m_map_override = m_map_override or {}
         self._stop = False
+        self.run_seed = experiment_seed()
+        self.rng = np.random.default_rng(self.run_seed)
 
     def stop(self):
         self._stop = True
@@ -85,7 +88,7 @@ class DatasetGeneratorThread(QThread):
 
     def _randomize_params(self, modulation):
         """Return a dict of waveform parameters with light randomization."""
-        rng = np.random.default_rng()
+        rng = self.rng
 
         params = dict(self._DEFAULTS)
 
@@ -143,6 +146,7 @@ class DatasetGeneratorThread(QThread):
                         alpha=params.get('alpha', 0.35),
                         span=params.get('span', 8),
                         pulse_shape=params.get('pulse_shape', 'rrc'),
+                        seed=(self.run_seed + count) % 2**32,
                     )
                     waveform.generate_data()
                     data = waveform.get_data()

@@ -8,6 +8,7 @@ taps computation via ``paths.taps()``, and config export matching the
 import numpy as np
 import tensorflow as tf
 from typing import Optional, List, Dict, Any
+from mixedsignal_gui.backend.experiment_settings import experiment_seed
 
 from sionna.rt import (
     load_scene, PlanarArray, Transmitter, Receiver, PathSolver,
@@ -245,6 +246,7 @@ class SimpleSimulationEngine:
                 specular_reflection=opts.get("specular_reflection", True),
                 diffuse_reflection=opts.get("diffuse_reflection", True),
                 refraction=opts.get("refraction", True),
+                seed=experiment_seed(),
             )
             self._last_paths = paths
             return self._extract_path_results(paths)
@@ -295,7 +297,7 @@ class SimpleSimulationEngine:
             "zero_padding": "Zero Padded",
             "noise_power_dBm": -108,
             "temperature": "undefined",
-            "seed": 42,
+            "seed": experiment_seed(),
             "sample_rate": 30.72e6,
             "transmitters": [
                 {

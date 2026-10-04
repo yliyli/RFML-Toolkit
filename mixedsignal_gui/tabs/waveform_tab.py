@@ -692,6 +692,7 @@ class WaveformSelectionTab(QWidget):
         self.current_baseband_symbols = result.get("baseband_symbols")
         # Carried to save_to_dataset_manager(), which runs in a separate method
         self.current_generator = result.get("generator")
+        self.current_seed_metadata = result.get("seed_metadata", {})
 
         self.update_waveform_plots()
 
@@ -719,6 +720,7 @@ class WaveformSelectionTab(QWidget):
             'output_type': self.output_type,
             'timestamp':   timestamp,
             'generator':   getattr(self, 'current_generator', None),
+            **getattr(self, 'current_seed_metadata', {}),
         }
 
         self.dataset_manager.save(name, self.current_data, metadata)
@@ -826,6 +828,7 @@ class WaveformSelectionTab(QWidget):
                             "output_type": self.output_type,
                             "timestamp":   timestamp,
                             "generator":   result.get("generator"),
+                            **result.get("seed_metadata", {}),
                         }
 
                         self.dataset_manager.save(name, data, metadata)
@@ -913,6 +916,7 @@ class WaveformSelectionTab(QWidget):
                         "output_type": self.output_type,
                         "timestamp":   timestamp,
                         "generator":   result.get("generator"),
+                        **result.get("seed_metadata", {}),
                     }
                     
                     self.dataset_manager.save(name, data, metadata)

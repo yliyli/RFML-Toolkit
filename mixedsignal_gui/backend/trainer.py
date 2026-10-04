@@ -6,6 +6,7 @@ import json
 import traceback
 import concurrent.futures
 import shutil
+import random
 
 import torch
 import torch.nn as nn
@@ -14,6 +15,7 @@ from torch.amp import GradScaler, autocast
 from torch.utils.data import TensorDataset, DataLoader
 
 from .torch_models import get_model, inspect_external_model
+from .experiment_settings import experiment_seed
 
 # Models that expect 2-channel IQ input
 IQ_MODELS = {'ResNet1DOptimized'}
@@ -63,7 +65,7 @@ class TrainerThread(QThread):
     def __init__(self, file_label_pairs, labels, model_name='SimpleCNN', epochs=10,
                  batch_size=32, lr=0.001, val_split=0.2,
                  weight_decay=1e-4, label_smoothing=0.1, grad_clip=1.0,
-                 model_hparams=None, model_plugin_path=None, save_dir=None, device='cpu'):
+                 model_hparams=None, model_plugin_path=None, save_dir=None, device='cpu', seed=None):
         super().__init__()
         self.file_label_pairs = list(file_label_pairs)
         self.labels = list(labels)
@@ -79,6 +81,7 @@ class TrainerThread(QThread):
         self.model_plugin_path = model_plugin_path
         self.model_plugin = inspect_external_model(model_plugin_path) if model_plugin_path else None
         self.save_dir = save_dir
+        self.seed = experiment_seed() if seed is None else int(seed)
         
         # Use provided device parameter instead of auto-detecting
         self.device = torch.device(device)
@@ -88,7 +91,8 @@ class TrainerThread(QThread):
         
         if self.device.type == 'cuda':
             if torch.cuda.is_available():
-                torch.backends.cudnn.benchmark = True
+                torch.backends.cudnn.benchmark = False
+                torch.backends.cudnn.deterministic = True
                 print(f"Using device: {self.device} - {torch.cuda.get_device_name(0)}")
             else:
                 print(f"Warning: CUDA device requested but not available, falling back to CPU")
@@ -165,6 +169,11 @@ class TrainerThread(QThread):
             self.finished.emit("")
 
     def _run(self):
+        random.seed(self.seed)
+        np.random.seed(self.seed % 2**32)
+        torch.manual_seed(self.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(self.seed)
         if not self.file_label_pairs:
             self.finished.emit("")
             return
@@ -278,7 +287,7 @@ class TrainerThread(QThread):
 
         # Shuffle
         idx = np.arange(len(X))
-        np.random.shuffle(idx)
+        np.random.default_rng(self.seed).shuffle(idx)
         X = X[idx]
         y = y[idx]
 
@@ -452,6 +461,7 @@ class TrainerThread(QThread):
 
             metadata = {
                 "model_name": self.model_name,
+                "run_seed": self.seed,
                 "class_labels": self.labels,
                 "num_classes": num_classes,
                 "input_channels": input_channels,

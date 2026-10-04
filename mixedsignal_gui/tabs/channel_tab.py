@@ -20,6 +20,7 @@ from mixedsignal_gui.backend.augmentation import (AugmentationPipeline, AWGNAugm
                                   StochasticTDLAugmentation, SionnaRTAugmentation,
                                   MeasuredChannelAugmentation)
 from mixedsignal_gui.backend.parameter_range import ParameterRange
+from mixedsignal_gui.backend.experiment_settings import experiment_seed
 from mixedsignal_gui.backend.bulk_augmentation import BulkAugmentationThread
 from mixedsignal_gui.backend.dataset_manager import DatasetManager
 from mixedsignal_gui.backend.channel_bank import ChannelBank, BIN_DTYPES, DOMAINS
@@ -51,7 +52,6 @@ class ChannelNoiseTab(QWidget):
         self.tdl_profile = "A"
         self.delay_spread_ns = 100.0
         self.stoch_snr_db = 20.0
-        self.stoch_seed = 42
         self.output_num_samples = 1024
 
         # RT state
@@ -477,17 +477,6 @@ class ChannelNoiseTab(QWidget):
         self.stoch_snr_spin.valueChanged.connect(lambda v: setattr(self, 'stoch_snr_db', v))
         layout.addWidget(self.stoch_snr_spin)
 
-        seed_row = QHBoxLayout()
-        seed_row.addWidget(QLabel("Random Seed"))
-        seed_row.addStretch()
-        self.seed_spin = QSpinBox()
-        self.seed_spin.setRange(0, 99999)
-        self.seed_spin.setValue(self.stoch_seed)
-        self.seed_spin.setFixedWidth(100)
-        self.seed_spin.valueChanged.connect(
-            lambda v: setattr(self, 'stoch_seed', v))
-        seed_row.addWidget(self.seed_spin)
-        layout.addLayout(seed_row)
 
         # --- Separator ---
         sep2 = QFrame()
@@ -828,7 +817,7 @@ class ChannelNoiseTab(QWidget):
 
         if self.meas_random_cb.isChecked():
             channels = self.channel_bank.channels
-            channel = channels[np.random.randint(len(channels))]
+            channel = channels[np.random.default_rng(experiment_seed()).integers(len(channels))]
         else:
             channel = self._measured_selected_channel()
             if channel is None:
@@ -841,6 +830,7 @@ class ChannelNoiseTab(QWidget):
             normalize=self.meas_normalize_cb.isChecked(),
             snr_db=(self.meas_snr_spin.value()
                     if self.meas_awgn_cb.isChecked() else None),
+            seed=experiment_seed(),
         )
 
     # ---- Ray Tracing page (full controls) ----
@@ -1738,7 +1728,7 @@ class ChannelNoiseTab(QWidget):
         metadata = entry
         fs = entry.get('fs', 8e6)
         return {
-            "seed": self.stoch_seed,
+            "seed": experiment_seed(),
             "waveform": {
                 "path": None,
                 "format": "npy",
@@ -1776,6 +1766,7 @@ class ChannelNoiseTab(QWidget):
         """Build multiantenna_config.json-schema dict from SionnaWidget state."""
         self._rt_push_channel_params()
         config = self.sionna_widget.get_rt_config()
+        config["seed"] = experiment_seed()
 
         entry = self._active_entry
         if entry:
@@ -1817,7 +1808,7 @@ class ChannelNoiseTab(QWidget):
         if self.active_subtab == 1:
             # Stochastic TDL path — sample ranges
             try:
-                rng = np.random.default_rng()
+                rng = np.random.default_rng(experiment_seed())
                 sampled_delay = self.delay_spread_spin.value_or_range().sample(rng)
                 sampled_stoch_snr = self.stoch_snr_spin.value_or_range().sample(rng)
 
@@ -1833,6 +1824,7 @@ class ChannelNoiseTab(QWidget):
                 augmented_signal = block.apply(signal, fs)
 
                 self.last_augmentation_config = {
+                    'run_seed': experiment_seed(),
                     'delay_spread_ns': self.delay_spread_spin.value_or_range().to_metadata(sampled_delay),
                     'stoch_snr_db': self.stoch_snr_spin.value_or_range().to_metadata(sampled_stoch_snr),
                     'stoch_config': config,
@@ -1902,7 +1894,7 @@ class ChannelNoiseTab(QWidget):
                 return
         else:
             # AWGN path — sample ranges once per apply
-            rng = np.random.default_rng()
+            rng = np.random.default_rng(experiment_seed())
             sampled_snr = self.snr_spin.value_or_range().sample(rng)
             sampled_amp = self.amplitude_spin.value_or_range().sample(rng)
             sampled_phase = self.phase_spin.value_or_range().sample(rng)
@@ -1910,7 +1902,7 @@ class ChannelNoiseTab(QWidget):
 
             pipeline = AugmentationPipeline()
             if self.awgn_enabled:
-                pipeline.add(AWGNAugmentation(snr_db=sampled_snr))
+                pipeline.add(AWGNAugmentation(snr_db=sampled_snr, seed=experiment_seed()))
             if self.amp_phase_enabled:
                 phase_rad = np.deg2rad(sampled_phase)
                 pipeline.add(ScalarAmplitudeAndPhaseShift(amplitude=sampled_amp, phi=phase_rad))
@@ -1920,6 +1912,7 @@ class ChannelNoiseTab(QWidget):
 
             # Record range + sampled values for save_augmented_dataset
             self.last_augmentation_config = {
+                'run_seed': experiment_seed(),
                 'awgn': {'enabled': self.awgn_enabled,
                          'snr_db': self.snr_spin.value_or_range().to_metadata(sampled_snr)},
                 'amp_phase': {'enabled': self.amp_phase_enabled,
@@ -2166,6 +2159,7 @@ class ChannelNoiseTab(QWidget):
             static_config=static_config,
             rt_taps=rt_taps,
             measured_channels=measured_channels,
+            seed=experiment_seed(),
         )
 
         # Progress dialog

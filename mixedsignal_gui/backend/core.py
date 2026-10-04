@@ -188,6 +188,7 @@ class Waveform:
         span: int = 8,
         pulse_shape: str = "rrc",
         output_type: str = "baseband",
+        seed: Optional[int] = None,
     ):
         self.config = WaveformConfig(
             modulation=modulation,
@@ -205,6 +206,7 @@ class Waveform:
         )
 
         self.matlab_engine = matlab_engine
+        self.seed = seed
         self._generator = generator_impl
         self._data: Optional[np.ndarray] = None
         self._metadata = {}
@@ -237,9 +239,9 @@ class Waveform:
                          and self.config.modulation in PULSE_SHAPED_MODULATIONS)
 
         if engine_live and not prefer_python:
-            self._generator = MATLABWaveformGenerator(engine)
+            self._generator = MATLABWaveformGenerator(engine, seed=self.seed)
         else:
-            self._generator = PythonWaveformGenerator()
+            self._generator = PythonWaveformGenerator(seed=self.seed)
 
     def generate(self) -> np.ndarray:
         self._ensure_generator()

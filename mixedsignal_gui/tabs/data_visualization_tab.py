@@ -22,6 +22,7 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 from mixedsignal_gui.widgets.wheel_filter import install_wheel_blocker
+from mixedsignal_gui.backend.experiment_settings import experiment_seed
 
 
 # ─────────────────────────────────────────────
@@ -39,6 +40,7 @@ class DimReduceThread(QThread):
         self.y      = y          # (N,)  int  — class indices
         self.method = method     # "PCA" | "t-SNE" | "UMAP"
         self.params = params     # dict of hyper-parameters
+        self.seed = experiment_seed()
 
     def run(self):
         try:
@@ -51,9 +53,9 @@ class DimReduceThread(QThread):
             if method == "PCA":
                 from sklearn.decomposition import PCA
                 coords_2d = PCA(n_components=2,
-                                random_state=42).fit_transform(X)
+                                random_state=self.seed).fit_transform(X)
                 coords_3d = PCA(n_components=3,
-                                random_state=42).fit_transform(X)
+                                random_state=self.seed).fit_transform(X)
 
             elif method == "t-SNE":
                 from sklearn.manifold import TSNE
@@ -65,7 +67,7 @@ class DimReduceThread(QThread):
                 tsne_kwargs = dict(
                     perplexity=perplexity,
                     learning_rate=p.get("learning_rate", 200),
-                    random_state=42,
+                    random_state=self.seed,
                 )
                 tsne_kwargs[iter_kwarg] = p.get("n_iter", 1000)
                 coords_2d = TSNE(n_components=2, **tsne_kwargs).fit_transform(X)
@@ -78,14 +80,14 @@ class DimReduceThread(QThread):
                     min_dist=p.get("min_dist", 0.1),
                     n_components=2,
                     metric=p.get("metric", "euclidean"),
-                    random_state=42
+                    random_state=self.seed
                 ).fit_transform(X)
                 coords_3d = umap_lib.UMAP(
                     n_neighbors=p.get("n_neighbors", 15),
                     min_dist=p.get("min_dist", 0.1),
                     n_components=3,
                     metric=p.get("metric", "euclidean"),
-                    random_state=42
+                    random_state=self.seed
                 ).fit_transform(X)
 
             else:

@@ -4,8 +4,9 @@ from typing import Optional
 
 class MATLABWaveformGenerator:
 
-    def __init__(self, matlab_engine: Optional[object]):
+    def __init__(self, matlab_engine: Optional[object], seed=None):
         self.matlab_engine = matlab_engine
+        self.seed = seed
         self.last_metadata = {"generator": "matlab"}
 
     def _matlab_to_numpy(self, data):
@@ -42,6 +43,8 @@ class MATLABWaveformGenerator:
                 f"resampling.")
 
         eng = self.matlab_engine.eng
+        if self.seed is not None:
+            eng.rng(float(self.seed), "twister", nargout=0)
         self.last_metadata = {"generator": "matlab"}
 
         # Modulations that return symbols as a second output

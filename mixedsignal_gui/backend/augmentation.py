@@ -406,6 +406,11 @@ class SionnaRTAugmentation(AugmentationBlock):
         import tensorflow as tf
         from sionna.phy.channel import ApplyTimeChannel
 
+        seed = self.config.get("seed")
+        if seed is not None:
+            from sionna.phy import config as sn_config
+            sn_config.seed = int(seed)
+
         x = np.asarray(signal, dtype=np.complex64).reshape(-1)
 
         # Normalize to unit power

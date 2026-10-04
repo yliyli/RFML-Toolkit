@@ -11,7 +11,7 @@ unique.
 from __future__ import annotations
 
 import traceback
-from datetime import datetime
+import copy
 from typing import Optional
 
 import numpy as np
@@ -27,6 +27,7 @@ from mixedsignal_gui.backend.augmentation import (
     MeasuredChannelAugmentation,
 )
 from mixedsignal_gui.backend.parameter_range import ParameterRange
+from mixedsignal_gui.backend.experiment_settings import experiment_seed
 
 
 class BulkAugmentationThread(QThread):
@@ -52,12 +53,14 @@ class BulkAugmentationThread(QThread):
         self._dest = dest_manager
         self._kind = augmentation_kind
         self._ranges = dict(ranges)
-        self._static = dict(static_config)
+        self._static = copy.deepcopy(static_config)
         self._rt_taps = rt_taps
         self._measured_channels = list(measured_channels) if measured_channels else []
         self._last_channel_name = None
         self._last_channel_index = None
-        self._seed = seed if seed is not None else int(datetime.now().timestamp())
+        self._seed = int(seed) if seed is not None else experiment_seed()
+        if self._seed < 0:
+            raise ValueError("Run seed must be nonnegative.")
         self._cancel = False
 
     def request_cancel(self) -> None:
@@ -66,7 +69,7 @@ class BulkAugmentationThread(QThread):
     # ------------------------------------------------------------------
     def run(self) -> None:  # noqa: C901 — intentionally flat
         try:
-            entries = self._source.scan()
+            entries = sorted(self._source.scan(), key=lambda entry: entry["name"])
         except Exception as exc:
             self.error.emit(f"Failed to scan source folder: {exc}")
             return
@@ -97,6 +100,7 @@ class BulkAugmentationThread(QThread):
                 for key, pr in self._ranges.items():
                     sampled[key] = pr.sample(rng)
 
+                self._augmentation_seed = int(rng.integers(0, 2**31))
                 augmented = self._apply_one(signal, fs, sampled, rng)
 
                 # For multi-channel output, pick one random antenna
@@ -116,6 +120,10 @@ class BulkAugmentationThread(QThread):
                 meta["original_name"] = name
                 meta["fs"] = fs
                 meta["augmentation_type"] = self._kind
+                meta["run_seed"] = self._seed
+                meta["entry_index"] = idx
+                meta["entry_seed"] = self._seed + idx
+                meta["augmentation_seed"] = self._augmentation_seed
 
                 aug_cfg: dict = {}
                 for key, pr in self._ranges.items():
@@ -123,7 +131,9 @@ class BulkAugmentationThread(QThread):
                 # Include static config entries
                 for key, val in self._static.items():
                     if key not in aug_cfg:
-                        aug_cfg[key] = val
+                        aug_cfg[key] = copy.deepcopy(val)
+                if hasattr(self, "_applied_config"):
+                    aug_cfg["applied_config"] = copy.deepcopy(self._applied_config)
                 meta["augmentation_config"] = aug_cfg
 
                 if ant_idx is not None:
@@ -161,7 +171,8 @@ class BulkAugmentationThread(QThread):
         if self._kind == "awgn":
             pipeline = AugmentationPipeline()
             if self._static.get("awgn_enabled", True):
-                pipeline.add(AWGNAugmentation(snr_db=sampled.get("snr_db", 20.0)))
+                pipeline.add(AWGNAugmentation(snr_db=sampled.get("snr_db", 20.0),
+                                              seed=self._augmentation_seed))
             if self._static.get("amp_phase_enabled", False):
                 phase_rad = np.deg2rad(sampled.get("phase_deg", 0.0))
                 pipeline.add(ScalarAmplitudeAndPhaseShift(
@@ -172,20 +183,23 @@ class BulkAugmentationThread(QThread):
             return pipeline.apply(signal, fs)
 
         elif self._kind == "stoch_tdl":
-            config = dict(self._static.get("stoch_config", {}))
+            config = copy.deepcopy(self._static.get("stoch_config", {}))
             # Patch sampled values into the config
             if "delay_spread_ns" in sampled:
                 config["channel"]["delay_spread_s"] = sampled["delay_spread_ns"] * 1e-9
             if "stoch_snr_db" in sampled:
                 config["noise"]["snr_db"] = sampled["stoch_snr_db"]
             # Fresh seed per entry
-            config["seed"] = int(rng.integers(0, 2**31))
+            config["seed"] = self._augmentation_seed
+            self._applied_config = copy.deepcopy(config)
             multi_ch = self._static.get("multi_channel", False)
             block = StochasticTDLAugmentation(config, multi_channel=multi_ch)
             return block.apply(signal, fs)
 
         elif self._kind == "rt":
-            config = dict(self._static.get("rt_config", {}))
+            config = copy.deepcopy(self._static.get("rt_config", {}))
+            config["seed"] = self._augmentation_seed
+            self._applied_config = copy.deepcopy(config)
             multi_ch = self._static.get("multi_channel", False)
             block = SionnaRTAugmentation(config, self._rt_taps,
                                          multi_channel=multi_ch)
@@ -217,9 +231,11 @@ class BulkAugmentationThread(QThread):
                 channel,
                 normalize=self._static.get("normalize", True),
                 snr_db=snr,
-                seed=int(rng.integers(0, 2**31)),
+                seed=self._augmentation_seed,
             )
-            return block.apply(signal, fs)
+            result = block.apply(signal, fs)
+            self._applied_config = block.to_config()
+            return result
 
         else:
             raise ValueError(f"Unknown augmentation kind: {self._kind!r}")

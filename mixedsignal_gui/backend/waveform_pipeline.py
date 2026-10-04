@@ -2,14 +2,20 @@ import numpy as np
 from scipy import signal
 
 from mixedsignal_gui.backend.core import Waveform
+from mixedsignal_gui.backend.experiment_settings import experiment_seed
 
 
 class WaveformPipeline:
-    def __init__(self, matlab_engine):
+    def __init__(self, matlab_engine, seed=None):
         self.matlab_engine = matlab_engine
+        self.run_seed = experiment_seed() if seed is None else int(seed)
+        self.entry_index = 0
 
     def generate(self, *, fs, Tsymb, Nsymb, fc, M, modulation,
                  var, alpha, span, pulse_shape, output_type="baseband"):
+        entry_index = self.entry_index
+        seed = (self.run_seed + entry_index) % 2**32
+        self.entry_index += 1
         waveform = Waveform(
             fs=fs,
             Tsymb=Tsymb,
@@ -23,6 +29,7 @@ class WaveformPipeline:
             span=span,
             pulse_shape=pulse_shape,
             output_type=output_type,
+            seed=seed,
         )
 
         waveform.generate_data()
@@ -48,4 +55,6 @@ class WaveformPipeline:
             # "matlab" or "python" — recorded in dataset metadata so a mixed
             # datasets/ folder stays traceable to how each signal was made.
             "generator": waveform.metadata.get("generator"),
+            "seed_metadata": {"run_seed": self.run_seed, "entry_index": entry_index,
+                              "generation_seed": seed},
         }
