@@ -173,6 +173,17 @@ class DatasetManager:
 
         return self.save(name, signal, meta)
 
+    def import_sigmf(self, path: str) -> list[dict]:
+        """Store observed SigMF regions unchanged in the shared dataset registry."""
+        from .sigmf_recordings import read_sigmf_regions
+        regions = read_sigmf_regions(path)
+        stem = Path(path).stem
+        entries = []
+        for index, (samples, metadata) in enumerate(regions):
+            name = self._unique_name(f"{stem}_region{index}")
+            entries.append(self.save(name, samples, metadata))
+        return entries
+
     def delete(self, name: str) -> bool:
         """Delete both files for a dataset. Returns True if deleted."""
         npy  = self.datasets_dir / f"{name}.npy"

@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                QPushButton, QComboBox, QFrame, QFileDialog,
                                QDoubleSpinBox, QSpinBox, QScrollArea, QMessageBox,
-                               QTabWidget, QSlider)
+                               QTabWidget, QSlider, QInputDialog)
 from PySide6.QtCore import Qt, QSettings
 import os
 import json
@@ -671,18 +671,38 @@ class EvaluateModelTab(QWidget):
         start_dir = settings.value("dataPath", "") or ""
         filepath, _ = QFileDialog.getOpenFileName(
             self, "Import Waveform", start_dir,
-            "Signal files (*.npy *.npz);;All Files (*)")
+            "Signal files (*.npy *.npz *.sigmf-meta *.sigmf-data);;All Files (*)")
         if not filepath:
             return
 
+        recording_metadata = None
         try:
-            arr = np.load(filepath, allow_pickle=True)
-            if isinstance(arr, np.lib.npyio.NpzFile):
-                keys = list(arr.keys())
-                if not keys:
-                    raise ValueError("archive contains no arrays")
-                arr = arr[keys[0]]
-            data = np.asarray(arr).reshape(-1)
+            if filepath.endswith((".sigmf-meta", ".sigmf-data")):
+                from mixedsignal_gui.backend.sigmf_recordings import read_sigmf_regions
+                regions = read_sigmf_regions(filepath)
+                index = 0
+                if len(regions) > 1:
+                    choices = [f"{i}: {m.get('class_label', 'Unlabeled')} — "
+                               f"start {m['sample_start']}, {m['sample_count']} samples"
+                               for i, (_, m) in enumerate(regions)]
+                    choice, ok = QInputDialog.getItem(
+                        self, "Select recorded region", "SigMF region", choices, 0, False)
+                    if not ok:
+                        return
+                    index = choices.index(choice)
+                data, recording_metadata = regions[index]
+                if self.dataset_manager is not None:
+                    stem = os.path.basename(filepath).rsplit('.', 1)[0]
+                    entry_name = self.dataset_manager._unique_name(f"{stem}_region{index}")
+                    self.dataset_manager.save(entry_name, data, recording_metadata)
+            else:
+                arr = np.load(filepath, allow_pickle=True)
+                if isinstance(arr, np.lib.npyio.NpzFile):
+                    keys = list(arr.keys())
+                    if not keys:
+                        raise ValueError("archive contains no arrays")
+                    arr = arr[keys[0]]
+                data = np.asarray(arr).reshape(-1)
             if data.size == 0:
                 raise ValueError("file contains no samples")
         except Exception as e:
@@ -695,7 +715,11 @@ class EvaluateModelTab(QWidget):
         fs, fc = float(self.fs), float(self.fc)
         meta_path = os.path.splitext(filepath)[0] + ".json"
         source = "panel values"
-        if os.path.exists(meta_path):
+        if recording_metadata is not None:
+            fs = recording_metadata["fs"]
+            fc = recording_metadata.get("fc")
+            source = "SigMF metadata"
+        elif os.path.exists(meta_path):
             try:
                 with open(meta_path, encoding="utf-8") as f:
                     side = json.load(f)
@@ -707,7 +731,7 @@ class EvaluateModelTab(QWidget):
 
         name = os.path.basename(filepath)
         self._last_signal = data
-        self._last_modulation = os.path.splitext(name)[0]
+        self._last_modulation = (recording_metadata or {}).get("class_label", os.path.splitext(name)[0])
         self._last_source = "imported"
 
         self._plot_signal(data, fs=fs, fc=fc, sps=None, modulation=None,

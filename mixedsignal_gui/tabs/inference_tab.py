@@ -189,6 +189,11 @@ class InferenceResultsTab(QWidget):
         self.load_registry_btn.setEnabled(False)
         layout.addWidget(self.load_registry_btn)
 
+        self.import_sigmf_btn = QPushButton("Import SigMF Recording…")
+        self.import_sigmf_btn.setEnabled(self.dataset_manager is not None)
+        self.import_sigmf_btn.clicked.connect(self._on_import_sigmf)
+        layout.addWidget(self.import_sigmf_btn)
+
         self.data_label = QLabel("No test data loaded")
         self.data_label.setProperty("class", "stat-label")
         self.data_label.setWordWrap(True)
@@ -375,6 +380,22 @@ class InferenceResultsTab(QWidget):
         )
 
     # ── Data loading ─────────────────────────────────────────────────────
+
+    def _on_import_sigmf(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import observed I/Q recording", "",
+            "SigMF recordings (*.sigmf-meta *.sigmf-data)")
+        if not path:
+            return
+        try:
+            entries = self.dataset_manager.import_sigmf(path)
+        except Exception as exc:
+            QMessageBox.warning(self, "SigMF Import Failed", str(exc))
+            return
+        self.data_label.setText(
+            f"Imported {len(entries)} SigMF regions. "
+            "Load from Dataset Registry to evaluate labeled regions, "
+            "or use Evaluate Model to classify one region.")
 
     def _on_load_from_registry(self):
         """Load signals from DatasetManager, grouped by modulation."""

@@ -97,6 +97,30 @@ On the first launch, the application displays a multi-page setup wizard that:
 
 Your settings are saved and the wizard won't appear again unless you reset settings or access it from the Help menu.
 
+### Reproducible runs and recorded I/Q
+
+Set **Settings → Compute → Experiment seed** (default: 42) and click Apply or OK.
+The value persists across restarts and is used by new generation, augmentation,
+training, and randomized visualization runs. Bulk runs derive distinct per-example seeds, record the run
+seed and entry index in each JSON sidecar, and process source names in a stable
+order. Repeatability requires the same input files, settings, and software/backend.
+
+To import observed I/Q, click **Import SigMF Recording…** on ML Training or
+Inference Results and select either member of a `.sigmf-meta`/`.sigmf-data` pair.
+Annotated sample regions (or whole captures when no annotations exist) are saved
+unchanged as NumPy arrays with SigMF provenance in the shared dataset registry.
+`core:label` becomes the training class and `core:frequency` supplies the capture
+frequency. Use **Load from Datasets** for labeled training regions, or **Load from
+Dataset Registry** for evaluation. Unlabeled regions remain stored without an
+invented class. In **Evaluate Model → Import Waveform**, select a SigMF file and
+choose one region for plotting and single-waveform classification.
+
+The importer requires a positive `core:sample_rate` and supports single-channel
+`cf32`, `cf64`, `ci8`, `ci16`, and `ci32` complex data, including declared little-
+or big-endian formats. Headers, offsets, nonstandard data paths, and multichannel
+recordings are rejected explicitly. Recordings are observed signals; the channel
+bank's import controls are for separately extracted channel responses.
+
 ### MATLAB Integration
 
 If MATLAB and the MATLAB Engine are installed, the app will automatically:

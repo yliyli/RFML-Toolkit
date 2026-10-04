@@ -76,6 +76,10 @@ class MLTrainingTab(QWidget):
         layout.addLayout(data_row1)
 
         data_row2 = QHBoxLayout()
+        self.import_sigmf_btn = QPushButton("Import SigMF Recording…")
+        self.import_sigmf_btn.setEnabled(self.dataset_manager is not None)
+        self.import_sigmf_btn.clicked.connect(self._import_sigmf_recording)
+        data_row2.addWidget(self.import_sigmf_btn)
         self.remove_data_btn = QPushButton("Remove Selected")
         self.remove_data_btn.clicked.connect(self.remove_selected_dataset)
         self.remove_data_btn.setEnabled(False)
@@ -533,6 +537,22 @@ class MLTrainingTab(QWidget):
         return legend_layout
 
     # ── Registry / quick-load ──────────────────────────────────────────────
+
+    def _import_sigmf_recording(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import observed I/Q recording", "",
+            "SigMF recordings (*.sigmf-meta *.sigmf-data)")
+        if not path:
+            return
+        try:
+            entries = self.dataset_manager.import_sigmf(path)
+        except Exception as exc:
+            QMessageBox.warning(self, "SigMF Import Failed", str(exc))
+            return
+        labeled = sum(bool(e.get("modulation")) for e in entries)
+        self.status_label.setText(
+            f"Imported {len(entries)} SigMF regions ({labeled} labeled). "
+            "Use Load from Datasets to add labeled regions to training.")
 
     def load_from_registry(self):
         """Load datasets from the shared DatasetManager, grouped by modulation as classes."""
