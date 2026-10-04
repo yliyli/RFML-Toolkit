@@ -192,6 +192,11 @@ class ChannelNoiseTab(QWidget):
         apply_btn.clicked.connect(self.apply_augmentations)
         layout.addWidget(apply_btn)
 
+        self.save_augmented_btn = QPushButton("Save Augmented Dataset")
+        self.save_augmented_btn.setEnabled(False)
+        self.save_augmented_btn.clicked.connect(self.save_augmented_dataset)
+        layout.addWidget(self.save_augmented_btn)
+
         # Bulk Apply Button
         bulk_btn = QPushButton("Apply to a Dataset Folder")
         bulk_btn.clicked.connect(self.apply_to_all_in_folder)
@@ -2022,6 +2027,7 @@ class ChannelNoiseTab(QWidget):
         }
         self.last_augmented_signal = self._last_augmentation["signal"]
         self.last_augmented_fs = fs
+        self.save_augmented_btn.setEnabled(True)
 
     def save_augmented_dataset(self):
         if not hasattr(self, '_last_augmentation'):

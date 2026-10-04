@@ -58,6 +58,17 @@ class ChannelProvenanceTests(unittest.TestCase):
     def saved(self):
         return [e for e in self.manager.scan() if e.get("augmented")]
 
+    def test_save_button_requires_successful_apply(self):
+        self.assertEqual(self.tab.save_augmented_btn.text(), "Save Augmented Dataset")
+        self.assertFalse(self.tab.save_augmented_btn.isHidden())
+        self.assertFalse(self.tab.save_augmented_btn.isEnabled())
+        self.tab.save_augmented_btn.click()
+        self.assertEqual(self.saved(), [])
+        self.tab.apply_augmentations()
+        self.assertTrue(self.tab.save_augmented_btn.isEnabled())
+        self.tab.save_augmented_btn.click()
+        self.assertEqual(len(self.saved()), 1)
+
     def test_awgn_save_keeps_applied_source_config_and_samples_after_switch(self):
         self.tab.apply_augmentations()
         expected_signal = self.tab.last_augmented_signal.copy()
@@ -66,8 +77,8 @@ class ChannelProvenanceTests(unittest.TestCase):
         self.tab.dataset_combo.setCurrentText("other")
         self.tab.snr_spin.setValue(1)
         self.tab.last_augmentation_config["awgn"]["enabled"] = False
-        self.tab.save_augmented_dataset()
-        self.tab.save_augmented_dataset()  # must not chain onto the first saved output
+        self.tab.save_augmented_btn.click()
+        self.tab.save_augmented_btn.click()  # must not chain onto the first saved output
         entries = self.saved()
         self.assertEqual(len(entries), 2)
         for entry in entries:
@@ -90,7 +101,7 @@ class ChannelProvenanceTests(unittest.TestCase):
         self.tab._on_subtab_changed(0)
         self.tab.stoch_multi_channel_cb.setChecked(False)
         self.tab.last_augmentation_config["stoch_config"]["channel"]["tdl_profile"] = "changed"
-        self.tab.save_augmented_dataset()
+        self.tab.save_augmented_btn.click()
         entry = self.saved()[0]
         self.assertEqual(entry["augmentation_type"], "stochastic_tdl")
         self.assertEqual(entry["augmentation_config"], config)
@@ -111,7 +122,7 @@ class ChannelProvenanceTests(unittest.TestCase):
         state["transmitters"][0]["power_dbm"] = -10
         self.tab.rt_multi_channel_cb.setChecked(False)
         self.tab.dataset_combo.setCurrentText("other")
-        self.tab.save_augmented_dataset()
+        self.tab.save_augmented_btn.click()
         entries = self.saved()
         self.assertEqual(len(entries), 2)
         for entry in entries:
@@ -130,7 +141,7 @@ class ChannelProvenanceTests(unittest.TestCase):
         expected = copy.deepcopy(block.to_config())
         channel.name = "changed-CIR"
         self.tab._on_subtab_changed(0)
-        self.tab.save_augmented_dataset()
+        self.tab.save_augmented_btn.click()
         self.assertEqual(self.saved()[0]["augmentation_type"], "measured_channel")
         self.assertEqual(self.saved()[0]["augmentation_config"], expected)
 
@@ -161,6 +172,7 @@ class ChannelProvenanceTests(unittest.TestCase):
         block.assert_not_called()
         self.assertIsNone(self.tab.rt_last_taps)
         self.assertFalse(hasattr(self.tab, "_last_augmentation"))
+        self.assertFalse(self.tab.save_augmented_btn.isEnabled())
 
     def test_rt_bulk_rejects_mixed_rates_before_writing(self):
         self.fake_rt()
