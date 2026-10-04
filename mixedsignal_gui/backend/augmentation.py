@@ -403,6 +403,10 @@ class SionnaRTAugmentation(AugmentationBlock):
         self.multi_channel = multi_channel
 
     def apply(self, signal: np.ndarray, fs: float, **kwargs) -> np.ndarray:
+        tap_grid = self.config.get("tap_grid") or {}
+        tap_fs = tap_grid.get("sampling_frequency", self.config.get("sample_rate"))
+        if tap_fs is not None and not np.isclose(float(tap_fs), float(fs), rtol=1e-9, atol=0):
+            raise ValueError(f"RT taps were sampled at {tap_fs} Hz, but the waveform uses {fs} Hz. Recompute taps at the waveform rate.")
         import tensorflow as tf
         from sionna.phy.channel import ApplyTimeChannel
 
@@ -444,7 +448,13 @@ class SionnaRTAugmentation(AugmentationBlock):
         input_wave = np.stack([x] * num_tx_ant, axis=0)
         input_wave = input_wave[np.newaxis, np.newaxis, :, :]
 
-        L_TOT = self.taps.shape[-1]
+        taps = self.taps
+        l_min = int(tap_grid.get("l_min", 0))
+        if l_min > 0:
+            # ApplyTimeChannel indexes its filter from zero; retain the
+            # physical lag when the selected interval starts later.
+            taps = np.pad(taps, [(0, 0)] * (taps.ndim - 1) + [(l_min, 0)])
+        L_TOT = taps.shape[-1]
 
         # Noise: dBm -> watts
         noise_power_dbm = float(self.config.get("noise_power_dBm", -108))
@@ -453,7 +463,7 @@ class SionnaRTAugmentation(AugmentationBlock):
         apply_ch = ApplyTimeChannel(num_time_samples=T, l_tot=L_TOT)
         output = apply_ch(
             tf.constant(input_wave, dtype=tf.complex64),
-            tf.constant(self.taps, dtype=tf.complex64),
+            tf.constant(taps, dtype=tf.complex64),
             tf.constant(noise_linear, dtype=tf.float32),
         )
         # output shape: (1, 1, num_rx_ant, T)

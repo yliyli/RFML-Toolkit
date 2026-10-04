@@ -1,4 +1,5 @@
 from datetime import datetime
+import copy
 
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFileDialog,
                                QPushButton, QFrame, QTableWidget, QTableWidgetItem,
@@ -56,6 +57,7 @@ class ChannelNoiseTab(QWidget):
 
         # RT state
         self.rt_last_taps = None
+        self.rt_tap_grid = None
         self.sionna_widget = None  # lazy-created
 
         # Measured-channel state: CIRs imported from real recordings
@@ -1199,6 +1201,7 @@ class ChannelNoiseTab(QWidget):
 
         # Clear stale taps from a previous scene
         self.rt_last_taps = None
+        self.rt_tap_grid = None
 
         # Re-enable compute button in case it was stuck from a prior error
         self.rt_compute_btn.setEnabled(True)
@@ -1346,10 +1349,7 @@ class ChannelNoiseTab(QWidget):
         self.sionna_widget.set_solver_options(opts)
 
     def _rt_get_channel_params_dict(self):
-        # sample_rate_hz is intentionally omitted here — it is overlaid
-        # from the active dataset's fs in _build_rt_config(), matching the
-        # CLIP_Datagen pipeline where bandwidth and sample_rate are distinct.
-        return {
+        params = {
             "bandwidth_hz": self.rt_bandwidth_spin.value() * 1e6,
             "l_min": self.rt_l_min_spin.value(),
             "l_max": self.rt_l_max_spin.value(),
@@ -1359,6 +1359,9 @@ class ChannelNoiseTab(QWidget):
             "zero_padding": self.rt_padding_combo.currentText(),
             "rx_antenna_index": self.rt_rx_antenna_idx_spin.value(),
         }
+        if self._active_entry is not None:
+            params["sample_rate_hz"] = float(self._active_entry["fs"])
+        return params
 
     def _rt_push_channel_params(self):
         if self.sionna_widget is not None:
@@ -1367,6 +1370,9 @@ class ChannelNoiseTab(QWidget):
     def _rt_compute_paths(self):
         if not self._ensure_sionna_widget():
             return
+
+        self.rt_last_taps = None
+        self.rt_tap_grid = None
 
         # Set engine frequency from dataset metadata before computing paths.
         entry = self._active_entry
@@ -1566,7 +1572,32 @@ class ChannelNoiseTab(QWidget):
 
     def _on_rt_taps_computed(self, taps):
         self.rt_last_taps = taps
+        self.rt_tap_grid = copy.deepcopy(self.sionna_widget.get_rt_config().get("tap_grid"))
         self.rt_status_label.setText(f"Taps ready: shape {taps.shape}")
+
+    def _ensure_rt_taps(self, fs):
+        """Regrid existing paths when the waveform rate or tap controls change."""
+        if self.sionna_widget is None or self.rt_last_taps is None:
+            return False
+        required = {
+            "sampling_frequency": float(fs),
+            "bandwidth": self.rt_bandwidth_spin.value() * 1e6,
+            "l_min": self.rt_l_min_spin.value(), "l_max": self.rt_l_max_spin.value(),
+        }
+        if self.rt_tap_grid == required:
+            return True
+        self.rt_last_taps = None
+        self.rt_tap_grid = None
+        self._rt_push_channel_params()
+        taps = self.sionna_widget.compute_taps(sampling_frequency=float(fs))
+        if taps is not None:
+            self._on_rt_taps_computed(taps)
+        if self.rt_tap_grid != required:
+            self.rt_last_taps = None
+            self.rt_tap_grid = None
+            self.rt_status_label.setText("Recompute paths: taps could not be aligned with the waveform grid")
+            return False
+        return True
 
     def _on_rt_error(self, msg):
         self.rt_status_label.setText(f"Error: {msg}")
@@ -1609,6 +1640,8 @@ class ChannelNoiseTab(QWidget):
                 self.display_original_signal()
                 self._update_stochastic_metadata()
                 self._update_rt_metadata()
+                if self.rt_last_taps is not None:
+                    self._ensure_rt_taps(entry['fs'])
 
     def _update_stochastic_metadata(self):
         """Auto-populate read-only carrier freq / sample rate from dataset metadata."""
@@ -1767,6 +1800,7 @@ class ChannelNoiseTab(QWidget):
         self._rt_push_channel_params()
         config = self.sionna_widget.get_rt_config()
         config["seed"] = experiment_seed()
+        config["tap_grid"] = copy.deepcopy(self.rt_tap_grid)
 
         entry = self._active_entry
         if entry:
@@ -1848,7 +1882,7 @@ class ChannelNoiseTab(QWidget):
                 return
         elif self.active_subtab == 2:
             # Ray Tracing path
-            if self.rt_last_taps is None:
+            if not self._ensure_rt_taps(fs):
                 QMessageBox.warning(
                     self, "No Taps",
                     "Load a scene and compute paths first."
@@ -1964,70 +1998,58 @@ class ChannelNoiseTab(QWidget):
             nsymb=nsymb,
         )
 
-        # Store augmented signal
-        self.last_augmented_signal = augmented_signal
+        # Freeze samples and their provenance together; saving must not read
+        # the current dataset, subtab, or controls after this successful apply.
+        save_mode = "Single Antenna"
+        if self.active_subtab == 1:
+            applied_config = self.last_augmentation_config
+            if multi_ch:
+                save_mode = self.stoch_save_mode_combo.currentText()
+        elif self.active_subtab == 2:
+            applied_config = copy.deepcopy(config)
+            applied_config["waveform_length"] = max(len(signal), int(config.get("waveform_length", len(signal))))
+            if multi_ch:
+                save_mode = self.rt_save_mode_combo.currentText()
+        elif self.active_subtab == 3:
+            applied_config = block.to_config()
+        else:
+            applied_config = self.last_augmentation_config
+        self._last_augmentation = {
+            "signal": np.array(augmented_signal, copy=True), "fs": fs,
+            "source_entry": copy.deepcopy(self.clean_metadata),
+            "type": ("awgn", "stochastic_tdl", "sionna_rt", "measured_channel")[self.active_subtab],
+            "config": copy.deepcopy(applied_config), "save_mode": save_mode,
+        }
+        self.last_augmented_signal = self._last_augmentation["signal"]
         self.last_augmented_fs = fs
 
     def save_augmented_dataset(self):
-        if not hasattr(self, 'last_augmented_signal'):
+        if not hasattr(self, '_last_augmentation'):
             print("[ChannelTab] No augmented signal to save. Apply augmentations first.")
             return
 
-        entry = self._active_entry
+        snapshot = self._last_augmentation
+        entry = snapshot['source_entry']
         base_name = entry['name'] if entry else "dataset"
         aug_name = self.dataset_manager._unique_name(f"{base_name}_augmented")
 
         # Build augmentation metadata on top of original entry
-        metadata = dict(entry) if entry else {}
+        metadata = copy.deepcopy(entry) if entry else {}
         # Drop internal path keys — they will be re-set by save()
         metadata.pop('_npy_path', None)
         metadata.pop('_json_path', None)
 
         metadata['augmented'] = True
         metadata['base_dataset'] = base_name
-        metadata['fs'] = self.last_augmented_fs
+        metadata['fs'] = snapshot['fs']
         metadata['source'] = 'augmented'
 
-        if self.active_subtab == 1:
-            metadata['augmentation_type'] = 'stochastic_tdl'
-            if hasattr(self, 'last_augmentation_config'):
-                metadata['augmentation_config'] = self.last_augmentation_config
-            else:
-                aug_config = self._build_stochastic_config()
-                aug_config["waveform"]["path"] = f"{aug_name}.npy"
-                metadata['augmentation_config'] = aug_config
-        elif self.active_subtab == 2:
-            aug_config = self._build_rt_config()
-            aug_config["transmitters"][0]["waveform_path"] = f"{aug_name}.npy"
-            metadata['augmentation_type'] = 'sionna_rt'
-            metadata['augmentation_config'] = aug_config
-        elif self.active_subtab == 3:
-            # Record which recorded CIR produced this, so the augmentation can
-            # be traced back to its source file later.
-            block = getattr(self, '_last_measured_block', None)
-            metadata['augmentation_type'] = 'measured_channel'
-            metadata['augmentation_config'] = (
-                block.to_config() if block is not None else {})
-        else:
-            metadata['augmentation_type'] = 'awgn'
-            if hasattr(self, 'last_augmentation_config'):
-                metadata['augmentation_config'] = self.last_augmentation_config
-            else:
-                metadata['augmentation_config'] = {
-                    'awgn':      {'enabled': self.awgn_enabled, 'snr_db': self.snr_db},
-                    'amp_phase': {'enabled': self.amp_phase_enabled,
-                                  'amplitude': self.amplitude, 'phase_deg': self.phase_deg},
-                    'freq_shift': {'enabled': self.freq_shift_enabled,
-                                   'freq_shift_hz': self.freq_shift_hz},
-                }
+        metadata['augmentation_type'] = snapshot['type']
+        metadata['augmentation_config'] = copy.deepcopy(snapshot['config'])
 
         # Determine save mode for multi-channel signals
-        signal = self.last_augmented_signal
-        save_mode = "Single Antenna"
-        if self.active_subtab == 1 and self.stoch_multi_channel_cb.isChecked():
-            save_mode = self.stoch_save_mode_combo.currentText()
-        elif self.active_subtab == 2 and self.rt_multi_channel_cb.isChecked():
-            save_mode = self.rt_save_mode_combo.currentText()
+        signal = snapshot['signal']
+        save_mode = snapshot['save_mode']
 
         if save_mode == "All Antennas (Separate Files)" and signal.ndim == 2:
             num_ant = signal.shape[0]
@@ -2086,8 +2108,6 @@ class ChannelNoiseTab(QWidget):
         if reply != QMessageBox.Yes:
             return
 
-        dest = DatasetManager(datasets_dir=dest_dir)
-
         # Build ranges + static config from current widget state
         ranges: dict[str, ParameterRange] = {}
         static_config: dict = {}
@@ -2119,9 +2139,19 @@ class ChannelNoiseTab(QWidget):
 
         elif self.active_subtab == 2:
             kind = "rt"
-            if self.rt_last_taps is None:
+            fs = self._active_entry['fs'] if self._active_entry else entries[0].get('fs')
+            if fs is None or not self._ensure_rt_taps(fs):
                 QMessageBox.warning(self, "No Taps",
                                     "Load a scene and compute paths first.")
+                return
+            mismatched = [e['name'] for e in entries
+                          if not np.isclose(float(e.get('fs', 1.0)), float(fs), rtol=1e-9, atol=0)]
+            if mismatched:
+                QMessageBox.warning(
+                    self, "RT sample-rate mismatch",
+                    f"RT taps use {fs:g} Hz. These datasets use a different sample rate:\n"
+                    + "\n".join(mismatched)
+                    + "\n\nProcess each sample-rate group separately and recompute taps at its rate.")
                 return
             rt_taps = self.rt_last_taps
             static_config["rt_config"] = self._build_rt_config()
@@ -2151,6 +2181,7 @@ class ChannelNoiseTab(QWidget):
         else:
             return
 
+        dest = DatasetManager(datasets_dir=dest_dir)
         self._bulk_thread = BulkAugmentationThread(
             source_manager=source,
             dest_manager=dest,

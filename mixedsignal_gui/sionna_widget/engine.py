@@ -1,7 +1,7 @@
 """Sionna RT simulation engine for 1 TX + 1 RX.
 
 Supports configurable antenna arrays, PathSolver options, TX power/velocity,
-taps computation via ``paths.taps()``, and config export matching the
+taps computation from ``paths.cir()`` on the waveform grid, and config export matching the
 ``multiantenna_config.json`` schema used by ``CLIP_datagen/RT/GenCode/runConfigs.py``.
 """
 
@@ -67,6 +67,7 @@ class SimpleSimulationEngine:
 
         self._last_paths = None
         self._last_taps: Optional[np.ndarray] = None
+        self._tap_grid: Optional[dict] = None
 
     # -- properties --------------------------------------------------------
 
@@ -101,6 +102,7 @@ class SimpleSimulationEngine:
         # Clear stale results from any previous scene
         self._last_paths = None
         self._last_taps = None
+        self._tap_grid = None
 
         try:
             self._scene = load_scene(path)
@@ -260,23 +262,36 @@ class SimpleSimulationEngine:
                      l_min: int = 0, l_max: int = 200) -> Optional[np.ndarray]:
         """Compute channel taps from the last computed paths.
 
-        Returns:
-            np.ndarray of shape (num_rx, num_tx, num_rx_ant, num_tx_ant, L_TOT)
-            where L_TOT = l_max - l_min + 1, or None if no paths available.
+        Returns a static array with shape (num_rx, num_rx_ant, num_tx,
+        num_tx_ant, 1, L_TOT), or None on failure.
         """
+        self._last_taps = None
+        self._tap_grid = None
         if self._last_paths is None:
             return None
         try:
-            taps = self._last_paths.taps(
-                bandwidth=bandwidth,
-                l_min=l_min,
-                l_max=l_max,
+            if bandwidth <= 0 or sampling_frequency <= 0 or l_max < l_min:
+                raise ValueError("Positive bandwidth/sample rate and l_max >= l_min are required.")
+            coefficients, delays = self._last_paths.cir(
                 sampling_frequency=sampling_frequency,
-                normalize=False,
                 normalize_delays=False,
                 out_type="numpy",
             )
+            # Paths.taps() uses bandwidth, not sampling_frequency, for its
+            # delay grid. Evaluate the same band-limited CIR at l/fs instead.
+            # BW/fs is the discrete-convolution scaling for oversampled taps.
+            delays = np.asarray(delays)
+            if delays.ndim == 3:  # synthetic arrays share delays across antennas
+                delays = delays[:, None, :, None, :]
+            lag_times = np.arange(l_min, l_max + 1) / sampling_frequency
+            kernel = (bandwidth / sampling_frequency) * np.sinc(
+                bandwidth * (lag_times - delays[..., None, None]))
+            taps = np.sum(np.asarray(coefficients)[..., None] * kernel, axis=4).astype(np.complex64)
             self._last_taps = taps
+            self._tap_grid = {
+                "sampling_frequency": float(sampling_frequency),
+                "bandwidth": float(bandwidth), "l_min": int(l_min), "l_max": int(l_max),
+            }
             return taps
         except Exception as e:
             import traceback
@@ -290,7 +305,9 @@ class SimpleSimulationEngine:
         """Export engine state as a dict matching multiantenna_config.json schema."""
         return {
             "cpu_mode": True,
-            "bandwidth": self._scene.bandwidth if self._scene and hasattr(self._scene, "bandwidth") else 5e6,
+            "tap_grid": dict(self._tap_grid) if self._tap_grid is not None else None,
+            "bandwidth": self._tap_grid["bandwidth"] if self._tap_grid else (
+                self._scene.bandwidth if self._scene and hasattr(self._scene, "bandwidth") else 5e6),
             "center_frequency": self._frequency,
             "filename": self._scene_path or "",
             "waveform_length": 1024,
@@ -298,7 +315,7 @@ class SimpleSimulationEngine:
             "noise_power_dBm": -108,
             "temperature": "undefined",
             "seed": experiment_seed(),
-            "sample_rate": 30.72e6,
+            "sample_rate": self._tap_grid["sampling_frequency"] if self._tap_grid else 30.72e6,
             "transmitters": [
                 {
                     "name": self.TX_NAME,

@@ -121,6 +121,14 @@ or big-endian formats. Headers, offsets, nonstandard data paths, and multichanne
 recordings are rejected explicitly. Recordings are observed signals; the channel
 bank's import controls are for separately extracted channel responses.
 
+RT taps use the waveform's sampling rate independently of channel bandwidth.
+Changing the dataset rate, bandwidth, or tap interval regrids the existing
+paths before applying them. RT folder runs require a common sample rate;
+process different-rate groups separately. A successful single-waveform apply
+captures its samples, source metadata, channel configuration, and antenna save
+mode together, so switching tabs or editing controls before saving does not
+change the saved provenance.
+
 ### MATLAB Integration
 
 If MATLAB and the MATLAB Engine are installed, the app will automatically:

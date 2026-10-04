@@ -286,14 +286,13 @@ class SionnaWidget(QWidget):
 
         Args:
             sampling_frequency: Explicit sampling frequency in Hz.  When None,
-                falls back to the bandwidth value (which is correct when
-                bandwidth == sample_rate, but callers should provide the
-                dataset's actual fs when available).
+                uses the dataset sample_rate_hz override when available,
+                otherwise falls back to bandwidth for standalone use.
 
         Returns the taps array, or None on failure.
         """
         ch = self._get_channel_params_dict()
-        sf = sampling_frequency if sampling_frequency is not None else ch["bandwidth_hz"]
+        sf = sampling_frequency if sampling_frequency is not None else ch.get("sample_rate_hz", ch["bandwidth_hz"])
         taps = self._engine.compute_taps(
             bandwidth=ch["bandwidth_hz"],
             sampling_frequency=sf,
@@ -309,10 +308,10 @@ class SionnaWidget(QWidget):
         config = self._engine.get_full_config()
         ch = self._get_channel_params_dict()
 
-        # Overlay channel params (sample_rate is NOT set here — it comes
-        # from the active dataset's fs in channel_tab._build_rt_config(),
-        # keeping bandwidth and sample_rate distinct per CLIP_Datagen).
+        # Keep the selected waveform sample rate distinct from bandwidth.
         config["bandwidth"] = ch["bandwidth_hz"]
+        if "sample_rate_hz" in ch:
+            config["sample_rate"] = ch["sample_rate_hz"]
         config["noise_power_dBm"] = ch["noise_power_dbm"]
         config["waveform_length"] = ch["waveform_length"]
         config["transmitters"][0]["power_dbm"] = ch["tx_power_dbm"]
@@ -409,7 +408,7 @@ class SionnaWidget(QWidget):
     def set_channel_params(self, params_dict: dict):
         """Store channel parameters override (used when _controls is None).
 
-        Expected keys: bandwidth_hz, l_min, l_max,
+        Expected keys: bandwidth_hz, optional sample_rate_hz, l_min, l_max,
         tx_power_dbm, noise_power_dbm, waveform_length, rx_antenna_index.
         """
         self._channel_params_override = dict(params_dict)
