@@ -874,7 +874,8 @@ class EvaluateModelTab(QWidget):
                     self.status_label.setText(msg)
                 return
             X = np.stack([raw.real, raw.imag], axis=0)[np.newaxis].astype(np.float32)
-            X = self._normalize_iq(X)
+            if not (self.model_metadata or {}).get("power_normalization"):
+                X = self._normalize_iq(X)
         else:
             # A real model on complex input: use I, which is what a real
             # receiver front-end would deliver.
@@ -884,6 +885,8 @@ class EvaluateModelTab(QWidget):
 
     def _run_model(self, X, target='generate'):
         """Run the loaded model on a prepared (1, C, L) array and show the result."""
+        from mixedsignal_gui.backend.preprocessing import normalize_for_model
+        X = normalize_for_model(X, self.model_metadata)
         tensor = torch.from_numpy(X).to(self.get_device())
         self.model.eval()
         with torch.no_grad():

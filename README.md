@@ -129,6 +129,21 @@ captures its samples, source metadata, channel configuration, and antenna save
 mode together, so switching tabs or editing controls before saving does not
 change the saved provenance.
 
+Training power-normalizes every example after padding/truncation, for real,
+complex I/Q, and multi-antenna inputs. One scale per example sets mean antenna
+power to one while preserving relative antenna levels. Zero inputs remain zero.
+New checkpoints record this rule under `power_normalization`, and both inference
+views reuse it. Older checkpoints without that field retain their original
+preprocessing; retrain them to use the new rule.
+
+LoRa chirps are generated directly in Python, even when MATLAB is available.
+`M` selects spreading factor 7–12 (clamped to that range); `fs * Tsymb`, rounded
+to an integer and at least two, sets samples per chip and hence chirp bandwidth.
+The packet contains preamble, sync, down-chirp delimiter, and randomized payload
+chirps, then is cropped to the requested length using the experiment seed.
+Baseband I/Q and real passband outputs are supported. This is waveform synthesis,
+not a complete LoRa protocol encoder.
+
 ### MATLAB Integration
 
 If MATLAB and the MATLAB Engine are installed, the app will automatically:

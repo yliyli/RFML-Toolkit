@@ -336,6 +336,49 @@ class PythonWaveformGenerator:
         phase = 2 * np.pi * np.cumsum(freq) / fs
         return np.exp(1j * phase)
 
+    @staticmethod
+    def _lora_chirp(k, chips, Ns, bandwidth, fs, phase_start, down=False, cut=None):
+        """Analytic CSS phase, including cyclic frequency wrap and end phase."""
+        cut = Ns if cut is None else cut
+        n = np.arange(cut, dtype=np.float64)
+        wrap = (1 - k / chips) * Ns
+        scale = bandwidth / fs
+        def phase_at(t):
+            before = 2 * np.pi * scale * ((k / chips - .5) * t + t * t / (2 * Ns))
+            at_wrap = 2 * np.pi * scale * ((k / chips - .5) * wrap + wrap * wrap / (2 * Ns))
+            after = at_wrap + 2 * np.pi * scale * (-.5 * (t - wrap) + (t - wrap) ** 2 / (2 * Ns))
+            return np.where(t <= wrap, before, after)
+        sign = -1 if down else 1
+        return (np.exp(1j * (phase_start + sign * phase_at(n))),
+                float(phase_start + sign * phase_at(float(cut))))
+
+    def _lora(self, cfg, output_len):
+        """Port of waveform_generator.m's preamble/sync/SFD/payload packet."""
+        sf = max(7, min(12, int(np.floor(cfg.M + .5))))
+        chips = 2 ** sf
+        oversampling = max(2, int(np.floor(cfg.fs * cfg.Tsymb + .5)))
+        bandwidth = cfg.fs / oversampling
+        Ns = chips * oversampling
+        quarter = Ns // 4
+        payload = self.rng.integers(0, chips, max(8, int(np.ceil((output_len + quarter) / Ns)) + 1))
+        phase, parts = 0.0, []
+        layout = [(0, False, Ns)] * 10 + [(0, True, Ns)] * 2 + [(0, True, quarter)]
+        layout += [(int(k), False, Ns) for k in payload]
+        for k, down, cut in layout:
+            chirp, phase = self._lora_chirp(k, chips, Ns, bandwidth, cfg.fs, phase, down, cut)
+            parts.append(chirp)
+        packet = np.concatenate(parts)
+        if len(packet) > output_len:
+            offset = int(self.rng.integers(0, len(packet) - output_len + 1))
+            result = packet[offset:offset + output_len]
+        else:
+            offset = 0
+            result = np.tile(packet, int(np.ceil(output_len / len(packet))))[:output_len]
+        self.last_metadata["lora"] = {"spreading_factor": sf, "oversampling": oversampling,
+                                      "bandwidth_hz": bandwidth, "samples_per_chirp": Ns,
+                                      "clip_offset": offset}
+        return result
+
     # -- entry point -----------------------------------------------------
 
     def generate(self, cfg) -> np.ndarray:
@@ -344,7 +387,7 @@ class PythonWaveformGenerator:
             raise RuntimeError(
                 f"{modulation} waveforms require MATLAB and the "
                 f"{MATLAB_ONLY_MODULATIONS[modulation]}. The Python generator covers "
-                "PAM, QAM, PSK, FSK, FHSS, LFM, Barker and FMCW; it cannot "
+                "PAM, QAM, PSK, FSK, FHSS, LFM, Barker, FMCW and LoRa; it cannot "
                 f"synthesise standards-compliant {modulation} frames."
             )
 
@@ -357,13 +400,14 @@ class PythonWaveformGenerator:
         baseband = cfg.output_type.lower() == "baseband"
 
         # Frequency/phase waveforms bypass pulse shaping and produce no symbols
-        if modulation in ("FSK", "FHSS", "LFM", "Barker", "FMCW"):
+        if modulation in ("FSK", "FHSS", "LFM", "Barker", "FMCW", "LoRa"):
             builder = {
                 "FSK": lambda: self._fsk(cfg, sps, output_len),
                 "FHSS": lambda: self._fhss(cfg, sps, output_len),
                 "LFM": lambda: self._lfm(cfg, output_len),
                 "Barker": lambda: self._barker(cfg, output_len),
                 "FMCW": lambda: self._fmcw(cfg, output_len),
+                "LoRa": lambda: self._lora(cfg, output_len),
             }[modulation]
             sig_bb = builder()
             if baseband:

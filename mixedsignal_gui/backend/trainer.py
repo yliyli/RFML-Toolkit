@@ -16,6 +16,7 @@ from torch.utils.data import TensorDataset, DataLoader
 
 from .torch_models import get_model, inspect_external_model
 from .experiment_settings import experiment_seed
+from .preprocessing import POWER_NORMALIZATION, normalize_model_input
 
 # Models that expect 2-channel IQ input
 IQ_MODELS = {'ResNet1DOptimized'}
@@ -274,7 +275,6 @@ class TrainerThread(QThread):
             pass  # already shaped as (batch, num_ch, target_len)
         elif np.iscomplexobj(X):
             X = self._prepare_iq_data(X)
-            X = self._normalize_iq(X)
             input_channels = 2
             print("IQ mode: complex baseband -> 2 channels (I, Q)")
         else:
@@ -284,6 +284,9 @@ class TrainerThread(QThread):
                 print(f"Note: {self.model_name} is an IQ architecture but the data "
                       "is real (passband); training it with 1 input channel. "
                       "Generate baseband (Complex IQ) datasets to use both.")
+
+        complex_iq = any(np.iscomplexobj(a) for a in X_list)
+        X = normalize_model_input(X, complex_iq=complex_iq)
 
         # Shuffle
         idx = np.arange(len(X))
@@ -466,6 +469,7 @@ class TrainerThread(QThread):
                 "num_classes": num_classes,
                 "input_channels": input_channels,
                 "signal_length": signal_len,
+                "power_normalization": {"method": POWER_NORMALIZATION, "complex_iq": complex_iq},
                 # Without these the tabs rebuild the model with library
                 # defaults, so anything trained at a non-default base_filters
                 # could never be loaded again — it failed with dozens of size

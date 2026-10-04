@@ -214,11 +214,12 @@ class Waveform:
     def _ensure_generator(self):
         """Pick a generator: MATLAB when it is usable, otherwise pure Python.
 
-        MATLAB stays the reference implementation, so it wins whenever the
-        engine is running.  An explicitly injected ``generator_impl`` always
+        MATLAB stays the reference implementation for other families. LoRa
+        uses the direct Python chirp construction even with a live engine.
+        An explicitly injected ``generator_impl`` always
         takes precedence, which is how callers and tests force one or the other.
 
-        The one exception is a fractional samples-per-symbol on a pulse-shaped
+        Python also handles a fractional samples-per-symbol on a pulse-shaped
         modulation.  waveform_generator.m rounds sps before pulse shaping, so
         MATLAB would generate at a symbol rate the caller did not ask for; the
         Python generator realises the rate exactly by rational resampling.  It
@@ -235,8 +236,8 @@ class Waveform:
         engine = self.matlab_engine
         engine_live = (engine is not None
                        and getattr(engine, "is_available", lambda: False)())
-        prefer_python = (self.config.is_fractional_sps
-                         and self.config.modulation in PULSE_SHAPED_MODULATIONS)
+        prefer_python = (self.config.modulation == "LoRa" or (
+            self.config.is_fractional_sps and self.config.modulation in PULSE_SHAPED_MODULATIONS))
 
         if engine_live and not prefer_python:
             self._generator = MATLABWaveformGenerator(engine, seed=self.seed)

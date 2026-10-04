@@ -22,6 +22,7 @@ from sklearn.metrics import (
 )
 
 from mixedsignal_gui.widgets.wheel_filter import install_wheel_blocker
+from mixedsignal_gui.backend.preprocessing import normalize_for_model
 
 # Models that expect 2-channel IQ input (must stay in sync with trainer.py)
 _IQ_MODELS = {"ResNet1DOptimized"}
@@ -644,6 +645,7 @@ class InferenceResultsTab(QWidget):
         if any(np.asarray(a).ndim == 2 for a in X_list):
             from mixedsignal_gui.backend.trainer import pack_multichannel
             X = np.stack([pack_multichannel(a, target_len) for a in X_list])
+            X = normalize_for_model(X, self.model_metadata)
             self.eval_data = torch.from_numpy(X)
             self.eval_labels = np.asarray(y_list, dtype=np.int64)
             self._invalidate_cache()
@@ -661,11 +663,13 @@ class InferenceResultsTab(QWidget):
 
         if self.model_in_channels == 2:
             X = self._prepare_iq(X)
-            X = self._normalize_iq(X)
+            if not self.model_metadata.get("power_normalization"):
+                X = self._normalize_iq(X)
         else:
             # np.real is a no-op on real data and takes I from complex input.
             X = np.real(X).astype(np.float32)[:, np.newaxis, :]   # (N, 1, L)
 
+        X = normalize_for_model(X, self.model_metadata)
         self.eval_data = torch.from_numpy(X)
         self.eval_labels = np.asarray(y_list, dtype=np.int64)
         self._invalidate_cache()
