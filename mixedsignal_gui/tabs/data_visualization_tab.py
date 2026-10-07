@@ -23,6 +23,8 @@ from matplotlib.figure import Figure
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 from mixedsignal_gui.widgets.wheel_filter import install_wheel_blocker
 from mixedsignal_gui.backend.experiment_settings import experiment_seed
+from mixedsignal_gui.backend.result_export import (array_fingerprint, data_identity_from_hashes,
+                                                    export_with_dialog)
 
 
 # ─────────────────────────────────────────────
@@ -408,6 +410,10 @@ class DataVisualizationTab(QWidget):
         self.run_btn.setMinimumHeight(36)
         self.run_btn.clicked.connect(self._run)
         layout.addWidget(self.run_btn)
+        self.export_btn = QPushButton("Export Results")
+        self.export_btn.setEnabled(False)
+        self.export_btn.clicked.connect(self._export_results)
+        layout.addWidget(self.export_btn)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 0)   # indeterminate
@@ -568,6 +574,7 @@ class DataVisualizationTab(QWidget):
         return None
 
     def _load_dataset(self):
+        self.export_btn.setEnabled(False)
         data_dir = self._find_waveform_data_dir()
         if data_dir is None:
             QMessageBox.warning(self, "Not found",
@@ -601,6 +608,7 @@ class DataVisualizationTab(QWidget):
 
 
     def _load_from_registry(self):
+        self.export_btn.setEnabled(False)
         """Load datasets from the DatasetManager registry and set up class checkboxes."""
         if self.dataset_manager is None:
             return
@@ -725,6 +733,7 @@ class DataVisualizationTab(QWidget):
             if os.path.isdir(os.path.join(data_dir, d))
         ])
         X_list, y_list = [], []
+        hashes, sources = [], []
 
         use_raw   = self.feat_raw.isChecked()
         use_fft   = self.feat_fft.isChecked()
@@ -740,6 +749,8 @@ class DataVisualizationTab(QWidget):
                 if feats is not None:
                     X_list.append(feats)
                     y_list.append(ci)
+                    hashes.append(array_fingerprint(sig))
+                    sources.append(os.path.join(cls_dir, fpath))
 
         if not X_list:
             raise ValueError("No data found! Generate waveforms first.")
@@ -750,6 +761,8 @@ class DataVisualizationTab(QWidget):
         std = X.std(axis=0)
         std[std == 0] = 1
         X /= std
+        self._export_data_identity = data_identity_from_hashes(hashes, y_list, classes)
+        self._export_sources = sources
         return X, y_list, classes
 
     def _collect_features_from_registry(self, max_per_class):
@@ -760,6 +773,7 @@ class DataVisualizationTab(QWidget):
 
         classes = sorted(registry.keys())
         X_list, y_list = [], []
+        hashes, sources = [], []
 
         use_raw   = self.feat_raw.isChecked()
         use_fft   = self.feat_fft.isChecked()
@@ -774,6 +788,8 @@ class DataVisualizationTab(QWidget):
                     if feats is not None:
                         X_list.append(feats)
                         y_list.append(ci)
+                        hashes.append(array_fingerprint(sig))
+                        sources.append(fpath)
                 except Exception as e:
                     print(f"[DataViz] Could not load {fpath}: {e}")
 
@@ -785,10 +801,13 @@ class DataVisualizationTab(QWidget):
         std = X.std(axis=0)
         std[std == 0] = 1
         X /= std
+        self._export_data_identity = data_identity_from_hashes(hashes, y_list, classes)
+        self._export_sources = sources
         return X, y_list, classes
 
     # ── run ──────────────────────────────────────────────────────────
     def _run(self):
+        self.export_btn.setEnabled(False)
         if not hasattr(self, "_data_dir") or (self._data_dir is None and not hasattr(self, "_registry_data")):
             # auto-detect waveform_data/
             data_dir = self._find_waveform_data_dir()
@@ -830,6 +849,13 @@ class DataVisualizationTab(QWidget):
             }
 
         self.run_btn.setEnabled(False)
+        self._export_visualization_details = {
+            'method': method, 'parameters': params, 'seed': experiment_seed(),
+            'max_samples_per_class': self.max_samples_spin.value(),
+            'features': {'raw': self.feat_raw.isChecked(), 'fft': self.feat_fft.isChecked(),
+                         'statistics': self.feat_stats.isChecked()},
+            'source_files': self._export_sources,
+        }
         self.progress_bar.setVisible(True)
         self.status_label.setText(f"Running {method}…  (may take ~30 s)")
 
@@ -902,10 +928,28 @@ class DataVisualizationTab(QWidget):
         self.canvas_3d.plot(coords_3d, labels, self._class_names,
                             title=f"{method} — 3D",
                             visible_classes=selected)
+        self.export_btn.setEnabled(True)
         if self._thread:
             self._thread.quit()
             self._thread.wait()
             self._thread = None
+
+    def _export_results(self):
+        if not self.export_btn.isEnabled() or self._coords_2d is None:
+            return
+        visible = self._get_selected_classes() or set(self._class_names)
+        tables = {}
+        for dimension, coords in ((2, self._coords_2d), (3, self._coords_3d)):
+            tables[f'coordinates_{dimension}d'] = (
+                ['sample_index', 'source_file', 'class', 'visible'] +
+                [f'coordinate_{i + 1}' for i in range(coords.shape[1])],
+                [[i, self._export_sources[i], self._class_names[int(label)],
+                  self._class_names[int(label)] in visible, *row]
+                 for i, (label, row) in enumerate(zip(self._labels, coords))])
+        export_with_dialog(self, data=self._export_data_identity, kind='data_visualization',
+            description=f"Visualization dataset: {self._data_dir or self.dataset_manager.datasets_dir}",
+            figures={'visualization_2d': self.canvas_2d.fig, 'visualization_3d': self.canvas_3d.fig},
+            tables=tables, details={**self._export_visualization_details, 'visible_classes': sorted(visible)})
 
     def _on_error(self, msg):
         self.progress_bar.setVisible(False)

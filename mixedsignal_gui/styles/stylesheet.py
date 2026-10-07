@@ -825,7 +825,9 @@ class SettingsDialog(QDialog):
         self.compact_check.setChecked(  s.value("compact",      False, type=bool))
         self.model_path_edit.setText(   s.value("modelPath",  ""))
         self.data_path_edit.setText(    s.value("dataPath",   ""))
-        self.output_path_edit.setText(  s.value("outputPath", ""))
+        from mixedsignal_gui.backend.result_export import output_folder
+        self.output_path_edit.setText(str(output_folder()))
+        self.output_path_edit.setToolTip("Export Results in Inference Results, Evaluate Model, and Data Visualization saves PNG/CSV runs here.")
         self.compute_mode_combo.setCurrentText(s.value("mode", "CPU"))
         self.experiment_seed_spin.setValue(int(s.value("experimentSeed", 42)))
         self.gpu_mem_spin.setValue(     float(s.value("gpuMemFraction", 0.9)))

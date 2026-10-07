@@ -7,6 +7,7 @@ import os
 import json
 import numpy as np
 import torch
+from mixedsignal_gui.backend.result_export import data_identity, model_identity, export_with_dialog
 
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
@@ -55,6 +56,7 @@ class EvaluateModelTab(QWidget):
         self.model_path = None
         self.model_metadata = None
         self.class_labels = []
+        self._export_snapshots = {}
 
         # Waveform defaults (match Waveform Selection tab)
         self.fc = 1e6       # Hz
@@ -260,6 +262,10 @@ class EvaluateModelTab(QWidget):
         self.import_btn.setMinimumHeight(32)
         self.import_btn.clicked.connect(self.import_and_classify)
         layout.addWidget(self.import_btn)
+        self.export_btn = QPushButton("Export Results")
+        self.export_btn.setEnabled(False)
+        self.export_btn.clicked.connect(lambda: self._export_results('generate'))
+        layout.addWidget(self.export_btn)
 
         self.status_label = QLabel("Load a model, then generate or import a waveform.")
         self.status_label.setProperty("class", "stat-label")
@@ -456,6 +462,10 @@ class EvaluateModelTab(QWidget):
         self.ch_apply_btn.setMinimumHeight(36)
         self.ch_apply_btn.clicked.connect(self._channel_test_classify)
         layout.addWidget(self.ch_apply_btn)
+        self.ch_export_btn = QPushButton("Export Results")
+        self.ch_export_btn.setEnabled(False)
+        self.ch_export_btn.clicked.connect(lambda: self._export_results('channel'))
+        layout.addWidget(self.ch_export_btn)
 
         self.ch_status_label = QLabel("Generate a waveform first, then apply impairments.")
         self.ch_status_label.setProperty("class", "stat-label")
@@ -562,6 +572,8 @@ class EvaluateModelTab(QWidget):
         self._do_load_model(model_path)
 
     def _do_load_model(self, filepath):
+        self._invalidate_exports()
+        self.model = self.model_path = None
         try:
             from mixedsignal_gui.backend.torch_models import get_model, external_plugin_path
 
@@ -607,6 +619,7 @@ class EvaluateModelTab(QWidget):
 
             self.model = model
             self.model_path = filepath
+            self._export_model_identity = model_identity(model, self.model_metadata, filepath)
             length = int((self.model_metadata or {}).get('signal_length') or TrainerThread.TARGET_LENGTH)
             self.sample_length_label.setText(f"Sample Length: {length} (checkpoint)")
 
@@ -738,6 +751,9 @@ class EvaluateModelTab(QWidget):
                 print(f"[EvaluateTab] Could not read sidecar {meta_path}: {e}")
 
         name = os.path.basename(filepath)
+        self._invalidate_exports()
+        self._last_input_description = f"Imported waveform: {filepath}"
+        self._last_plot_metadata_source = source
         self._last_signal = data
         self._last_modulation = (recording_metadata or {}).get("class_label", os.path.splitext(name)[0])
         self._last_source = "imported"
@@ -759,6 +775,7 @@ class EvaluateModelTab(QWidget):
     def _plot_signal(self, data, *, fs, fc, sps, modulation, m, nsymb,
                      baseband_symbols):
         """Draw the four signal views. Shared by the generate and import paths."""
+        self._last_plot_fs, self._last_plot_fc = fs, fc
         t = np.arange(len(data)) / fs * 1e6   # time axis in microseconds
 
         if np.iscomplexobj(data):
@@ -779,6 +796,9 @@ class EvaluateModelTab(QWidget):
         self.spectrogram_plot.plot_data(x=data, fs=fs, modulation=modulation)
 
     def generate_and_classify(self):
+        self._invalidate_exports()
+        self._last_input_description = 'Generated waveform (not imported recording)'
+        self._last_plot_metadata_source = 'generation parameters'
         modulation = selected_modulation(self.waveform_combo)
         fs = float(self.fs)
         tsymb = float(self.Tsymb)
@@ -853,6 +873,9 @@ class EvaluateModelTab(QWidget):
         # rather than flattened — flattening kept only antenna 0 and then read
         # its Q as though it were antenna 1.
         arr = np.asarray(data)
+        self._export_snapshots.pop(target, None)
+        (self.ch_export_btn if target == 'channel' else self.export_btn).setEnabled(False)
+        self._export_native_signal = arr.copy()
         if arr.ndim == 2 and arr.shape[0] <= 64:
             X = pack_multichannel(arr, target_len)[np.newaxis]
             return self._run_model(X, target)
@@ -923,6 +946,57 @@ class EvaluateModelTab(QWidget):
                 f"{verb} {self._last_modulation} → classified as {pred_name}"
             )
             self._plot_probabilities(probs, target='generate')
+
+        self._export_snapshots[target] = {
+            'signal': self._export_native_signal.copy(), 'input': X.copy(), 'probabilities': probs.copy(),
+            'description': getattr(self, '_last_input_description', 'In-memory waveform'),
+            'fs': float(self.fs) if target == 'channel' else getattr(self, '_last_plot_fs', self.fs),
+            'fc': float(self.fc) if target == 'channel' else getattr(self, '_last_plot_fc', self.fc),
+            'source': self._last_source, 'modulation': self._last_modulation,
+            'plot_metadata_source': 'panel values' if target == 'channel' else
+                getattr(self, '_last_plot_metadata_source', 'panel values'),
+            'channel': {'awgn': self.ch_awgn_toggle.isChecked(), 'snr_db': self.ch_snr_db,
+                        'amplitude_phase': self.ch_amp_phase_toggle.isChecked(),
+                        'amplitude': self.ch_amplitude, 'phase_deg': self.ch_phase_deg,
+                        'frequency_shift': self.ch_freq_shift_toggle.isChecked(),
+                        'frequency_shift_hz': self.ch_freq_shift_hz} if target == 'channel' else None,
+        }
+        (self.ch_export_btn if target == 'channel' else self.export_btn).setEnabled(True)
+
+    def _invalidate_exports(self):
+        self._export_snapshots.clear()
+        self.export_btn.setEnabled(False)
+        self.ch_export_btn.setEnabled(False)
+
+    def _export_results(self, target='generate'):
+        snapshot = self._export_snapshots.get(target)
+        if snapshot is None:
+            return
+        probs = snapshot['probabilities']
+        names = self.class_labels or [f'Class {i}' for i in range(len(probs))]
+        raw = snapshot['signal']
+        raw = raw[np.newaxis] if raw.ndim == 1 else raw
+        headers = ['sample_index'] + [name for i in range(raw.shape[0])
+                                     for name in (f'real_{i}', f'imag_{i}')]
+        rows = ([j, *[value for a in raw for value in (a[j].real, a[j].imag)]]
+                for j in range(raw.shape[-1]))
+        tables = {'waveform': (headers, rows),
+                  'model_input': (['sample_index'] + [f'channel_{i}' for i in range(snapshot['input'].shape[1])],
+                      ([j, *snapshot['input'][0, :, j]] for j in range(snapshot['input'].shape[-1]))),
+                  'probabilities': (['class', 'probability', 'predicted'],
+                      [[name, float(p), i == int(np.argmax(probs))] for i, (name, p) in enumerate(zip(names, probs))])}
+        if target == 'channel':
+            figures = {name: spec['figure'] for name, spec in self.ch_comparison_plot._tab_specs.items()}
+            figures['probabilities'] = self.ch_prob_figure
+        else:
+            figures = {name: widget.figure for name, widget in (
+                ('waveform', self.waveform_plot), ('frequency', self.freq_plot),
+                ('constellation', self.constellation_plot), ('spectrogram', self.spectrogram_plot))}
+            figures['probabilities'] = self.prob_figure
+        export_with_dialog(self, data=data_identity([snapshot['signal']]), model=self._export_model_identity,
+            kind=f'single_{target}_evaluation', description=snapshot['description'],
+            figures=figures, tables=tables,
+            details={k: v for k, v in snapshot.items() if k not in ('signal', 'input', 'probabilities')})
 
     def _plot_probabilities(self, probs, target='generate'):
         """Draw horizontal bar chart of class probabilities."""

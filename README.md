@@ -172,6 +172,25 @@ chirps, then is cropped to the requested length using the experiment seed.
 Baseband I/Q and real passband outputs are supported. This is waveform synthesis,
 not a complete LoRa protocol encoder.
 
+### Result exports
+
+**Export Results** in Inference Results, Evaluate Model (including Channel Test),
+and Data Visualization writes PNG plots and numeric CSV tables to
+**Settings → Paths → Output folder**. The default is `~/Documents/rfml_output`.
+Export is enabled only after a successful evaluation or visualization.
+
+Each model/data pair has a content-fingerprinted folder; repeated exports create
+new `run_<UTC timestamp>` subfolders with `plots/`, `csv/`, and `run.txt`/`run.json`
+provenance. The root `index.txt` documents all pairs and their run counts.
+Fingerprints include loaded weights and model metadata, native sample contents,
+ordered labels, and class names—not just filenames. Visualization uses a
+dataset-only group, without a model. Changes to the model, labels, or data form a
+new group. CSVs contain predictions/probabilities, confusion matrices/reports/ROC,
+single-waveform samples/model inputs, or visualization coordinates as applicable.
+Exports do not modify samples or recalibrate plot units; no data is exported
+automatically, and previous runs are never overwritten. Reload test data after
+changing the batch-evaluation checkpoint to apply its input preprocessing.
+
 ### MATLAB Integration
 
 If MATLAB and the MATLAB Engine are installed, the app will automatically:

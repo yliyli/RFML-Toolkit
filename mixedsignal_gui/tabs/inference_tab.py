@@ -24,6 +24,7 @@ from sklearn.metrics import (
 
 from mixedsignal_gui.widgets.wheel_filter import install_wheel_blocker
 from mixedsignal_gui.backend.preprocessing import normalize_for_model
+from mixedsignal_gui.backend.result_export import data_identity, model_identity, export_with_dialog
 
 # Models that expect 2-channel IQ input (must stay in sync with trainer.py)
 _IQ_MODELS = {"ResNet1DOptimized"}
@@ -214,6 +215,10 @@ class InferenceResultsTab(QWidget):
         self.eval_all_btn.clicked.connect(self._evaluate_all)
         self.eval_all_btn.setMinimumHeight(36)
         layout.addWidget(self.eval_all_btn)
+        self.export_btn = QPushButton("Export Results")
+        self.export_btn.setEnabled(False)
+        self.export_btn.clicked.connect(self._export_results)
+        layout.addWidget(self.export_btn)
 
         # ── Classification report (text) ─────────────────────────────────
         report_title = QLabel("Classification Report")
@@ -318,7 +323,11 @@ class InferenceResultsTab(QWidget):
         self._enable_data_buttons()
 
     def _load_model(self, filepath: str, num_classes: int = 2):
-        """Load model weights, read metadata, update UI."""
+        """Load model weights, read metadata, update UI; reload data afterward."""
+        self._invalidate_cache()
+        self.eval_data = self.eval_labels = None
+        self.model = self.model_path = None
+        self.eval_all_btn.setEnabled(False)
         try:
             from mixedsignal_gui.backend.torch_models import get_model, external_plugin_path
 
@@ -372,6 +381,7 @@ class InferenceResultsTab(QWidget):
             self.model_path = filepath
             self.model_in_channels = in_channels
             self.model_signal_length = signal_length
+            self._export_model_identity = model_identity(self.model, self.model_metadata, filepath)
             self.sample_length_label.setText(
                 f"Sample Length: {signal_length} (checkpoint)" if signal_length
                 else "Sample Length: automatic (legacy checkpoint without length)")
@@ -381,6 +391,7 @@ class InferenceResultsTab(QWidget):
             self.model_label.setText(
                 f"Loaded: {os.path.basename(filepath)} ({model_name}) on {dev_name}"
             )
+            self.data_label.setText("Load test data for this checkpoint")
         except Exception as exc:
             self.model_label.setText(f"Failed to load: {exc}")
             print(f"[InferenceTab] Error loading model: {exc}")
@@ -467,6 +478,7 @@ class InferenceResultsTab(QWidget):
             return
 
         self._build_eval_tensors(X_list, y_list)
+        self._export_source_description = f"Dataset registry: {self.dataset_manager.datasets_dir}"
         extra = f" ({skipped} skipped)" if skipped else ""
         self.data_label.setText(
             f"Loaded {len(X_list)} signals, {len(label_map)} classes{extra}{split_note}"
@@ -492,6 +504,7 @@ class InferenceResultsTab(QWidget):
                 for fname in files:
                     if fname.lower().endswith((".npy", ".npz", ".csv")):
                         signal_files.append(os.path.join(root, fname))
+            signal_files.sort()
             if not signal_files:
                 self.data_label.setText("No .npy / .npz / .csv files found")
                 return
@@ -538,6 +551,7 @@ class InferenceResultsTab(QWidget):
                 return
 
             self._build_eval_tensors(X_list, y_list)
+            self._export_source_description = f"Test data folder: {folder}"
             note = ""
             if unmatched:
                 n = sum(unmatched.values())
@@ -647,6 +661,11 @@ class InferenceResultsTab(QWidget):
 
     def _build_eval_tensors(self, X_list: list, y_list: list):
         """Pad/truncate, shape for the model, store as tensors."""
+        self._invalidate_cache()
+        self.eval_data = self.eval_labels = None
+        self.eval_all_btn.setEnabled(False)
+        self._export_data_identity = data_identity(X_list, y_list, self.class_labels)
+        self._export_source_description = 'In-memory test examples'
         # Target length: use model's expected length, or max in batch.
         # shape[-1], not .size — a (4, 2048) capture is 2048 long, not 8192.
         target_len = self.model_signal_length or max(a.shape[-1] for a in X_list)
@@ -693,6 +712,8 @@ class InferenceResultsTab(QWidget):
     def _invalidate_cache(self):
         self._cached_y_pred = None
         self._cached_probs = None
+        self._roc_data = None
+        self.export_btn.setEnabled(False)
 
     def _run_inference(self):
         """Run the model on eval_data once and cache predictions + probs."""
@@ -729,6 +750,40 @@ class InferenceResultsTab(QWidget):
         self._show_confusion_matrix()
         self._show_report()
         self._show_roc()
+        self.export_btn.setEnabled(True)
+
+    def _export_results(self):
+        if self._cached_probs is None or not self.export_btn.isEnabled():
+            return
+        names = (self.class_labels if len(self.class_labels) == self._cached_probs.shape[1]
+                 else [str(i) for i in range(self._cached_probs.shape[1])])
+        indices = list(range(len(names)))
+        report = classification_report(self.eval_labels, self._cached_y_pred,
+                                       labels=indices, target_names=names,
+                                       output_dict=True, zero_division=0)
+        cm = confusion_matrix(self.eval_labels, self._cached_y_pred, labels=indices)
+        tables = {
+            'predictions': (['sample_index', 'true_label', 'predicted_label'] +
+                            [f'probability_{name}' for name in names],
+                            [[i, names[int(y)], names[int(pred)], *prob]
+                             for i, (y, pred, prob) in enumerate(zip(self.eval_labels,
+                                 self._cached_y_pred, self._cached_probs))]),
+            'confusion_matrix': (['true_label'] + names, [[name, *row] for name, row in zip(names, cm)]),
+            'classification_report': (['label', 'precision', 'recall', 'f1_score', 'support'],
+                [[name, row['precision'], row['recall'], row['f1-score'], row['support']]
+                 for name, row in report.items() if isinstance(row, dict)]),
+        }
+        figures = {'confusion_matrix': self.cm_figure}
+        if self._roc_data:
+            figures['roc_curves'] = self.roc_figure
+            tables['roc_curves'] = (['class', 'false_positive_rate', 'true_positive_rate', 'auc'],
+                [[label, f, t, area] for label, fpr, tpr, area in self._roc_data[0]
+                 for f, t in zip(fpr, tpr)])
+        export_with_dialog(self, data=self._export_data_identity, model=self._export_model_identity,
+            kind='batch_evaluation', description=self._export_source_description, figures=figures, tables=tables,
+            texts={'classification_report': self.report_label.text()},
+            details={'accuracy': float(np.mean(self.eval_labels == self._cached_y_pred)),
+                     'sample_length': self.eval_data.shape[-1], 'class_labels': names})
 
     # ── Confusion matrix ─────────────────────────────────────────────────
 
@@ -835,6 +890,9 @@ class InferenceResultsTab(QWidget):
             roc_data.append((labels[k], fpr, tpr, auc_val))
 
         if not roc_data:
+            self._roc_data = None
+            self.roc_figure.clear()
+            self.roc_canvas.draw()
             self.report_label.setText(
                 self.report_label.text() + "\n\n(ROC: not enough classes with data)"
             )
