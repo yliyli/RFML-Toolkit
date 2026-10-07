@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                QPushButton, QComboBox, QGridLayout, QFrame, QProgressBar, QFileDialog,
                                QListWidget, QListWidgetItem, QDoubleSpinBox, QScrollArea,
-                               QCheckBox, QMessageBox, QToolButton,
+                               QCheckBox, QMessageBox,
                                QSpinBox, QLineEdit)
 from PySide6.QtCore import Qt, Signal, QSettings
 
@@ -11,6 +11,7 @@ import torch
 
 from mixedsignal_gui.widgets.training_chart import TrainingChartWidget
 from mixedsignal_gui.widgets.wheel_filter import install_wheel_blocker
+from mixedsignal_gui.widgets.hover_help import HoverHelpButton
 
 
 class MLTrainingTab(QWidget):
@@ -59,27 +60,21 @@ class MLTrainingTab(QWidget):
 
         # ── Dataset buttons — split into two rows so they don't clip ──────
         data_row1 = QHBoxLayout()
-        self.add_data_btn = QPushButton("Add Data Folder")
-        self.add_data_btn.clicked.connect(self.add_data_folder)
-        data_row1.addWidget(self.add_data_btn)
-
-        self.load_registry_btn = QPushButton("\U0001f4c2 Load from Datasets")
-        self.load_registry_btn.setToolTip("Group datasets by modulation type and load as training classes")
-        self.load_registry_btn.clicked.connect(self.load_from_registry)
+        self.load_registry_btn = QPushButton("Load Toolbox Datasets")
+        self.load_registry_btn.clicked.connect(self.choose_toolbox_dataset_folder)
         self.load_registry_btn.setEnabled(False)
         data_row1.addWidget(self.load_registry_btn)
 
-        self.quick_load_btn = QPushButton("\U0001f4e6 Quick Load Dataset")
-        self.quick_load_btn.setToolTip("Auto-load class folders from waveform_data/ directory")
-        self.quick_load_btn.clicked.connect(self.quick_load_dataset)
-        data_row1.addWidget(self.quick_load_btn)
+        self.add_data_btn = QPushButton("Import External Data")
+        self.add_data_btn.clicked.connect(self.add_data_folder)
+        data_row1.addWidget(self.add_data_btn)
+        self.import_sigmf_btn = QPushButton("Import Long SigMF")
+        self.import_sigmf_btn.setEnabled(self.dataset_manager is not None)
+        self.import_sigmf_btn.clicked.connect(self._import_sigmf_recording)
+        data_row1.addWidget(self.import_sigmf_btn)
         layout.addLayout(data_row1)
 
         data_row2 = QHBoxLayout()
-        self.import_sigmf_btn = QPushButton("Import SigMF Recording…")
-        self.import_sigmf_btn.setEnabled(self.dataset_manager is not None)
-        self.import_sigmf_btn.clicked.connect(self._import_sigmf_recording)
-        data_row2.addWidget(self.import_sigmf_btn)
         self.remove_data_btn = QPushButton("Remove Selected")
         self.remove_data_btn.clicked.connect(self.remove_selected_dataset)
         self.remove_data_btn.setEnabled(False)
@@ -90,6 +85,30 @@ class MLTrainingTab(QWidget):
         self.clear_data_btn.setEnabled(False)
         data_row2.addWidget(self.clear_data_btn)
         data_row2.addStretch()
+        self.dataset_help_btn = HoverHelpButton(
+            "<b>Load Toolbox Datasets</b><br>Select a dataset folder; the picker "
+            "starts at the Data folder in Settings &rarr; Paths. Only pairs "
+            "directly inside the selected folder are loaded, not its subfolders. "
+            "Classes come from companion JSON modulation fields. Load another "
+            "folder to add examples to the same classes; already loaded files "
+            "are skipped. Examples marked data_split=test are held out.<br><br>"
+            "<b>Import External Data</b><br>Select a parent folder with class "
+            "subfolders, e.g. dataset/LoRa/example.npy and dataset/BPSK/example.npy. "
+            "Subfolder names are the labels; filenames do not define classes. "
+            "Use one numeric array per example: complex IQ shape (N,), ideally "
+            "the selected Sample Length. Shape (antennas, N) means antenna channels, not a batch. "
+            "Real arrays, .npz (first array), and .csv are also supported.<br><br>"
+            "<b>Import Long SigMF</b><br>Select .sigmf-meta with its matching "
+            ".sigmf-data beside it. For labeled training regions, annotations "
+            "must define core:sample_start, core:sample_count, and core:label. "
+            "Each region is saved unchanged as .npy plus JSON; then click Load "
+            "Toolbox Datasets. There is no automatic windowing. Without "
+            "annotations, whole captures are imported; unlabeled captures are "
+            "not training classes. Training truncates/pads each example to Sample Length "
+            "(default 2048). Keep windows from one recording in the same train/test split.",
+            inner,
+        )
+        data_row2.addWidget(self.dataset_help_btn)
         layout.addLayout(data_row2)
 
         # ── Dataset list ───────────────────────────────────────────────────
@@ -110,10 +129,16 @@ class MLTrainingTab(QWidget):
         self.load_model_plugin_btn = QPushButton("Load Python…")
         self.load_model_plugin_btn.clicked.connect(self._choose_model_plugin)
         arch_row.addWidget(self.load_model_plugin_btn)
-        self.model_plugin_help_btn = QToolButton()
-        self.model_plugin_help_btn.setText("?")
-        self.model_plugin_help_btn.setToolTip("Custom PyTorch model requirements")
-        self.model_plugin_help_btn.clicked.connect(self._show_model_plugin_help)
+        self.model_plugin_help_btn = HoverHelpButton(
+            "<b>Model Architecture</b><br>Select a built-in model, or use Load "
+            "Python… to import a trusted .py architecture (not pretrained weights). "
+            "It must define build_model(num_classes, input_size, in_channels, "
+            "**kwargs) and return torch.nn.Module. Input shape is "
+            "(batch, in_channels, input_size); output must be unnormalized logits "
+            "of shape (batch, num_classes). Class count comes from the loaded "
+            "dataset. The validated model appears in this menu. The plugin is "
+            "copied beside its trained checkpoint for evaluation/inference.", inner,
+        )
         arch_row.addWidget(self.model_plugin_help_btn)
         layout.addLayout(arch_row)
 
@@ -147,6 +172,14 @@ class MLTrainingTab(QWidget):
         self.batch_spin.setValue(64)
         self.batch_spin.setMinimumWidth(80)
         eb_layout.addWidget(self.batch_spin, 0, 3)
+        eb_layout.addWidget(QLabel("Sample Length"), 1, 0)
+        self.sample_length_spin = QSpinBox()
+        self.sample_length_spin.setRange(32, 65536)
+        self.sample_length_spin.setValue(2048)
+        self.sample_length_spin.setToolTip(
+            "Samples per example: longer signals are truncated, shorter signals are zero-padded. "
+            "No automatic windowing. Saved checkpoints retain this length.")
+        eb_layout.addWidget(self.sample_length_spin, 1, 1)
 
         layout.addLayout(eb_layout)
 
@@ -382,24 +415,8 @@ class MLTrainingTab(QWidget):
             self._update_train_button_state()
             return
 
-        label = os.path.basename(folder.rstrip(os.sep)) or folder
-        orig_label = label
-        i = 1
-        while label in self.datasets:
-            label = f"{orig_label}_{i}"
-            i += 1
-
-        files = self._gather_dataset_files(folder)
-        if not files:
-            self.status_label.setText("No supported files (.npy/.npz/.csv) found")
-            return
-
-        self.datasets[label] = files
-        item = QListWidgetItem(f"{label} ({len(files)} files)")
-        item.setData(Qt.UserRole, label)
-        self.dataset_list.addItem(item)
-        self.clear_data_btn.setEnabled(True)
-        self._update_train_button_state()
+        self.status_label.setText(
+            "Select a parent folder containing class subfolders with .npy/.npz/.csv examples.")
 
     def remove_selected_dataset(self):
         items = self.dataset_list.selectedItems()
@@ -552,14 +569,23 @@ class MLTrainingTab(QWidget):
         labeled = sum(bool(e.get("modulation")) for e in entries)
         self.status_label.setText(
             f"Imported {len(entries)} SigMF regions ({labeled} labeled). "
-            "Use Load from Datasets to add labeled regions to training.")
+            "Use Load Toolbox Datasets to add labeled regions to training.")
 
-    def load_from_registry(self):
-        """Load datasets from the shared DatasetManager, grouped by modulation as classes."""
+    def choose_toolbox_dataset_folder(self):
         if self.dataset_manager is None:
             return
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select Toolbox Dataset Folder", str(self.dataset_manager.datasets_dir))
+        if folder:
+            self.load_from_registry(folder)
 
-        entries = self.dataset_manager.scan()
+    def load_from_registry(self, folder=None):
+        """Add selected metadata-backed examples, merging labels and deduplicating paths."""
+        if self.dataset_manager is None:
+            return
+        from mixedsignal_gui.backend.dataset_manager import DatasetManager
+        manager = DatasetManager(folder) if folder else self.dataset_manager
+        entries = manager.scan()
         # Any entry carrying a modulation label is usable, augmented or not.
         # This used to require `not augmented`, which made the whole channel
         # workflow untrainable: a bulk augmentation run writes 900 files that all
@@ -590,31 +616,28 @@ class MLTrainingTab(QWidget):
             if npy:
                 by_modulation[mod].append(npy)
 
-        if len(by_modulation) < 2:
-            self.status_label.setText(
-                f"Only {len(by_modulation)} modulation class(es) found \u2013 need \u2265 2. "
-                "Use Batch Generate on the Waveform tab."
-            )
-            return
-
         added = 0
+        loaded_paths = {os.path.realpath(p) for files in self.datasets.values() for p in files}
         for mod, files in sorted(by_modulation.items()):
-            label = mod
-            base_label = label
-            i = 1
-            while label in self.datasets:
-                label = f"{base_label}_{i}"
-                i += 1
-            self.datasets[label] = files
-            item = QListWidgetItem(f"{label} ({len(files)} files) [registry]")
-            item.setData(Qt.UserRole, label)
-            self.dataset_list.addItem(item)
-            added += 1
+            new_files = [p for p in files if os.path.realpath(p) not in loaded_paths]
+            if not new_files:
+                continue
+            self.datasets.setdefault(mod, []).extend(new_files)
+            loaded_paths.update(os.path.realpath(p) for p in new_files)
+            item = next((self.dataset_list.item(i) for i in range(self.dataset_list.count())
+                         if self.dataset_list.item(i).data(Qt.UserRole) == mod), None)
+            if item is None:
+                item = QListWidgetItem()
+                item.setData(Qt.UserRole, mod)
+                self.dataset_list.addItem(item)
+            item.setText(f"{mod} ({len(self.datasets[mod])} files)")
+            added += len(new_files)
 
         self.clear_data_btn.setEnabled(True)
         held_note = (f"; held back {len(held_out)} test sample(s) for the "
                      f"Inference tab" if held_out else "")
-        self.status_label.setText(f"Loaded {added} class(es) from registry{held_note}")
+        self.status_label.setText(
+            f"Added {added} example(s) from {manager.datasets_dir.name}{held_note}")
         self._update_train_button_state()
 
     def _browse_save_path(self):
@@ -623,55 +646,7 @@ class MLTrainingTab(QWidget):
         if folder:
             self.model_save_path_edit.setText(folder)
 
-    def quick_load_dataset(self):
-        """Auto-load class folders from waveform_data/ directory."""
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        base_dir = os.path.dirname(script_dir)
-        waveform_dir = os.path.join(base_dir, 'waveform_data')
-
-        if not os.path.isdir(waveform_dir):
-            waveform_dir = os.path.join(os.getcwd(), 'waveform_data')
-
-        if not os.path.isdir(waveform_dir):
-            self.status_label.setText("No waveform_data/ directory found")
-            return
-
-        self.clear_datasets()
-        loaded = 0
-        for entry in sorted(os.listdir(waveform_dir)):
-            class_dir = os.path.join(waveform_dir, entry)
-            if not os.path.isdir(class_dir):
-                continue
-            files = self._gather_dataset_files(class_dir)
-            if not files:
-                continue
-            label = entry
-            self.datasets[label] = files
-            item = QListWidgetItem(f"{label} ({len(files)} files)")
-            item.setData(Qt.UserRole, label)
-            self.dataset_list.addItem(item)
-            loaded += 1
-
-        if loaded > 0:
-            self.clear_data_btn.setEnabled(True)
-            self.status_label.setText(f"Loaded {loaded} classes from waveform_data/")
-        else:
-            self.status_label.setText(
-                f"No class subfolders with data found in {waveform_dir}. "
-                "Use Batch Generate on the Waveform tab first."
-            )
-        self._update_train_button_state()
-
     # ── Training ───────────────────────────────────────────────────────────
-
-    def _show_model_plugin_help(self):
-        QMessageBox.information(
-            self, "Custom PyTorch model",
-            "Select a trusted Python file that defines\n\n"
-            "build_model(num_classes, input_size, in_channels, **kwargs)\n\n"
-            "The function must return a torch.nn.Module whose forward method "
-            "returns unnormalized class logits. The model receives tensors shaped "
-            "(batch, in_channels, input_size).")
 
     def _choose_model_plugin(self):
         path, _ = QFileDialog.getOpenFileName(self, "Select PyTorch model", "", "Python files (*.py)")
@@ -766,6 +741,7 @@ class MLTrainingTab(QWidget):
             model_plugin_path=plugin["path"] if plugin else None,
             save_dir=save_dir,
             device=device,
+            sample_length=self.sample_length_spin.value(),
         )
         self._trainer.progress.connect(self.update_training_progress)
         self._trainer.finished.connect(self.on_training_finished)

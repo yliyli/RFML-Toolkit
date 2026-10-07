@@ -56,18 +56,25 @@ class ChannelProvenanceTests(unittest.TestCase):
         return widget, state
 
     def saved(self):
-        return [e for e in self.manager.scan() if e.get("augmented")]
+        folder = self.root / self.tab.augmentation_name_edit.text()
+        return DatasetManager(folder).scan() if folder.exists() else []
 
     def test_save_button_requires_successful_apply(self):
         self.assertEqual(self.tab.save_augmented_btn.text(), "Save Augmented Dataset")
         self.assertFalse(self.tab.save_augmented_btn.isHidden())
         self.assertFalse(self.tab.save_augmented_btn.isEnabled())
         self.tab.save_augmented_btn.click()
+
         self.assertEqual(self.saved(), [])
         self.tab.apply_augmentations()
         self.assertTrue(self.tab.save_augmented_btn.isEnabled())
         self.tab.save_augmented_btn.click()
         self.assertEqual(len(self.saved()), 1)
+
+    def test_ray_tracing_defaults_are_single_tx_and_rx(self):
+        for spin in (self.tab.rt_tx_ant_rows, self.tab.rt_tx_ant_cols,
+                     self.tab.rt_rx_ant_rows, self.tab.rt_rx_ant_cols):
+            self.assertEqual(spin.value(), 1)
 
     def test_awgn_save_keeps_applied_source_config_and_samples_after_switch(self):
         self.tab.apply_augmentations()

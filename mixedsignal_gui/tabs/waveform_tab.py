@@ -10,6 +10,7 @@ from mixedsignal_gui.widgets.wheel_filter import install_wheel_blocker
 from mixedsignal_gui.widgets.modulation_utils import (mark_unavailable_modulations,
                                                      selected_modulation)
 from mixedsignal_gui.backend.generators import unavailable_modulations
+from mixedsignal_gui.backend.dataset_manager import DatasetManager, dataset_folder_path
 import numpy as np
 from datetime import datetime
 
@@ -202,8 +203,16 @@ class BatchGenerationConfigDialog(QDialog):
         output_row.addWidget(QLabel("Output type:"))
         self._output_type_combo = QComboBox()
         self._output_type_combo.addItems(["Passband (Real)", "Baseband (Complex IQ)"])
+        self._output_type_combo.setCurrentIndex(
+            0 if getattr(self.parent(), 'output_type', 'baseband') == 'passband' else 1)
         output_row.addWidget(self._output_type_combo)
         output_row.addStretch()
+        self.select_all_btn = QPushButton("Select All")
+        self.select_all_btn.clicked.connect(lambda: self._set_all_selected(True))
+        output_row.addWidget(self.select_all_btn)
+        self.unselect_all_btn = QPushButton("Unselect All")
+        self.unselect_all_btn.clicked.connect(lambda: self._set_all_selected(False))
+        output_row.addWidget(self.unselect_all_btn)
         layout.addLayout(output_row)
         
         # Scroll area for modulation configs
@@ -213,6 +222,7 @@ class BatchGenerationConfigDialog(QDialog):
         scroll_layout = QVBoxLayout(scroll_widget)
         
         # Create config for each modulation
+        self.mod_checkboxes = {}
         for mod in self.modulations:
             mod_frame = self.create_modulation_frame(mod)
             scroll_layout.addWidget(mod_frame)
@@ -245,8 +255,9 @@ class BatchGenerationConfigDialog(QDialog):
         
         # Enable checkbox
         enable_chk = QCheckBox(modulation)
-        enable_chk.setChecked(True)
+        enable_chk.setChecked(self.config[modulation]['enabled'])
         enable_chk.stateChanged.connect(lambda: self._update_config(modulation, 'enabled', enable_chk.isChecked()))
+        self.mod_checkboxes[modulation] = enable_chk
         layout.addWidget(enable_chk, row, 0, 1, 2)
         
         row += 1
@@ -305,6 +316,10 @@ class BatchGenerationConfigDialog(QDialog):
         
         return frame
     
+    def _set_all_selected(self, selected):
+        for checkbox in self.mod_checkboxes.values():
+            checkbox.setChecked(selected)
+
     def _update_config(self, modulation, key, value):
         """Update config for a modulation."""
         self.config[modulation][key] = value
@@ -500,6 +515,11 @@ class WaveformSelectionTab(QWidget):
             lambda idx: setattr(self, "output_type", "baseband" if idx == 0 else "passband")
         )
         layout.addWidget(self.output_type_combo)
+
+        layout.addWidget(QLabel("Dataset Folder Name"))
+        self.dataset_name_edit = QLineEdit(f"generated_{datetime.now():%Y%m%d_%H%M%S}")
+        self.dataset_name_edit.setToolTip("Subfolder of the Data folder in Settings. Saves with the same name add examples to that folder.")
+        layout.addWidget(self.dataset_name_edit)
 
         generate_btn = QPushButton("▶ Generate Dataset")
         generate_btn.clicked.connect(self.generate_dataset)
@@ -703,8 +723,12 @@ class WaveformSelectionTab(QWidget):
             print("✗ No waveform generated yet. Generate a dataset first.")
             return
 
+        destination = self._generation_destination()
+        if destination is None:
+            return
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        name = f"{self.current_modulation}_{int(self.M)}_{timestamp}"
+        name = destination._unique_name(f"{self.current_modulation}_{int(self.M)}_{timestamp}")
 
         metadata = {
             'source':      'generated',
@@ -723,14 +747,22 @@ class WaveformSelectionTab(QWidget):
             **getattr(self, 'current_seed_metadata', {}),
         }
 
-        self.dataset_manager.save(name, self.current_data, metadata)
+        destination.save(name, self.current_data, metadata)
         print(f"✓ Saved dataset: {name}")
+
+    def _generation_destination(self):
+        try:
+            return DatasetManager(dataset_folder_path(self.dataset_manager.datasets_dir,
+                                                      self.dataset_name_edit.text()))
+        except ValueError as exc:
+            QMessageBox.warning(self, "Invalid Dataset Folder Name", str(exc))
+            return None
 
     
     def batch_generate(self):
         """Generate labelled datasets for every enabled modulation.
 
-        Files land in the shared dataset folder as ``<Mod>_<M>_<timestamp>``
+        Files land in the named dataset subfolder as ``<Mod>_<M>_<timestamp>``
         pairs and accumulate across runs; nothing is overwritten.  Class
         membership comes from the ``modulation`` metadata field, so no
         train/test partition is imposed here -- keep a hold-out set in its own
@@ -756,10 +788,11 @@ class WaveformSelectionTab(QWidget):
             return  # User cancelled
         
         batch_config = dialog.get_config()
-        # Ours: every enabled family, driven by the dialog's own checkboxes.
-        # The bulk branch hardcoded a five-entry list and pulled output type from
-        # a combo inside the dialog; the tab-level combo is authoritative now and
-        # covers all thirteen families.
+        # Output type is dialog metadata, not a modulation configuration.
+        output_type = batch_config.pop('_output_type', self.output_type)
+        destination = self._generation_destination()
+        if destination is None:
+            return
         modulations = list(batch_config.keys())
         from mixedsignal_gui.backend.waveform_pipeline import WaveformPipeline
         pipeline = WaveformPipeline(self.matlab)
@@ -807,7 +840,7 @@ class WaveformSelectionTab(QWidget):
                             alpha=self.alpha,
                             span=self.span,
                             pulse_shape=self.pulse_shape_combo.currentText(),
-                            output_type=self.output_type,
+                            output_type=output_type,
                         )
                         data = result["signal"]
                         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
@@ -825,13 +858,13 @@ class WaveformSelectionTab(QWidget):
                             "alpha":       self.alpha,
                             "span":        self.span,
                             "pulse_shape": self.pulse_shape_combo.currentText(),
-                            "output_type": self.output_type,
+                            "output_type": output_type,
                             "timestamp":   timestamp,
                             "generator":   result.get("generator"),
                             **result.get("seed_metadata", {}),
                         }
 
-                        self.dataset_manager.save(name, data, metadata)
+                        destination.save(name, data, metadata)
 
                         count_saved += 1
                         if count_saved % 10 == 0:
@@ -866,6 +899,9 @@ class WaveformSelectionTab(QWidget):
             return
         
         test_config = dialog.get_config()
+        destination = self._generation_destination()
+        if destination is None:
+            return
         modulations = test_config['modulations']
         samples_per_mod = test_config['samples_per_mod']
         m_values_dict = test_config['m_values']
@@ -919,7 +955,7 @@ class WaveformSelectionTab(QWidget):
                         **result.get("seed_metadata", {}),
                     }
                     
-                    self.dataset_manager.save(name, data, metadata)
+                    destination.save(name, data, metadata)
                     count += 1
                     
                 except Exception as e:

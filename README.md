@@ -105,15 +105,43 @@ training, and randomized visualization runs. Bulk runs derive distinct per-examp
 seed and entry index in each JSON sidecar, and process source names in a stable
 order. Repeatability requires the same input files, settings, and software/backend.
 
-To import observed I/Q, click **Import SigMF Recording…** on ML Training or
-Inference Results and select either member of a `.sigmf-meta`/`.sigmf-data` pair.
+On ML Training, **Load Toolbox Datasets** opens a folder picker starting at the
+Data folder in Settings. Choose the generated or augmented folder to load its
+direct .npy/JSON pairs, using metadata class labels and excluding held-out test
+entries. Load additional folders to merge examples under the same class names;
+already-loaded files are skipped. Subfolders are not automatically included.
+Generation still writes to the Data folder configured in Settings: select a
+named subfolder there for each experiment or train/test dataset. Loading a folder
+for training does not change that generation destination.
+**Import External Data** selects a parent folder with class-named subfolders:
+one `.npy`, `.npz`, or `.csv` per example. Complex IQ has shape `(N,)`;
+`(antennas, N)` denotes antenna channels, not a batch. Hover over the circled
+question marks for dataset/model requirements.
+
+To import observed I/Q, click **Import Long SigMF** on ML Training or
+**Import SigMF Recording…** on Inference Results and select either member
+of a `.sigmf-meta`/`.sigmf-data` pair.
 Annotated sample regions (or whole captures when no annotations exist) are saved
 unchanged as NumPy arrays with SigMF provenance in the shared dataset registry.
 `core:label` becomes the training class and `core:frequency` supplies the capture
-frequency. Use **Load from Datasets** for labeled training regions, or **Load from
+frequency. Use **Load Toolbox Datasets** for labeled training regions, or **Load from
 Dataset Registry** for evaluation. Unlabeled regions remain stored without an
 invented class. In **Evaluate Model → Import Waveform**, select a SigMF file and
 choose one region for plotting and single-waveform classification.
+Import does not automatically window a recording. Define labeled annotation
+regions with `core:sample_start`, `core:sample_count`, and `core:label` before
+import to obtain multiple examples. Training truncates/pads each example to
+the selected **Sample Length** (default 2048); native stored samples remain unchanged.
+Evaluation displays and uses the saved checkpoint length. Keep windows from the
+same recording in the same train/test partition to avoid leakage.
+
+Generation saves into the editable **Dataset Folder Name** under the Settings
+Data folder (default `generated_<timestamp>`). Reusing the name adds examples to
+that folder. Channel saves use **Augmentation Folder Name** (default
+`augmented_<timestamp>`): both bulk and single-example output are under the
+Settings Data folder, beside generated dataset folders. Bulk runs require a
+new output folder name. Channel preview discovers examples in these subfolders;
+training loads the specific folder selected with **Load Toolbox Datasets**.
 
 The importer requires a positive `core:sample_rate` and supports single-channel
 `cf32`, `cf64`, `ci8`, `ci16`, and `ci32` complex data, including declared little-

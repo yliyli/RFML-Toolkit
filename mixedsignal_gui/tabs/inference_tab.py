@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QEvent, QSettings
 from PySide6.QtWidgets import QApplication
+from mixedsignal_gui.widgets.hover_help import HoverHelpButton, CHECKPOINT_HELP
 import os
 import json as _json
 import numpy as np
@@ -162,12 +163,19 @@ class InferenceResultsTab(QWidget):
 
         self.load_model_btn = QPushButton("Load Model (.pth)")
         self.load_model_btn.clicked.connect(self._on_load_model)
-        layout.addWidget(self.load_model_btn)
+        model_row = QHBoxLayout()
+        model_row.addWidget(self.load_model_btn)
+        self.model_help_btn = HoverHelpButton(CHECKPOINT_HELP, panel)
+        model_row.addWidget(self.model_help_btn)
+        layout.addLayout(model_row)
 
         self.model_label = QLabel("No model loaded")
         self.model_label.setProperty("class", "stat-label")
         self.model_label.setWordWrap(True)
         layout.addWidget(self.model_label)
+        self.sample_length_label = QLabel("Sample Length: 2048 (default; no model loaded)")
+        self.sample_length_label.setToolTip("Fixed by the loaded checkpoint; inputs are padded or truncated to match.")
+        layout.addWidget(self.sample_length_label)
 
         layout.addWidget(QLabel("Classes:"))
         self.class_labels_label = QLabel("—")
@@ -364,6 +372,9 @@ class InferenceResultsTab(QWidget):
             self.model_path = filepath
             self.model_in_channels = in_channels
             self.model_signal_length = signal_length
+            self.sample_length_label.setText(
+                f"Sample Length: {signal_length} (checkpoint)" if signal_length
+                else "Sample Length: automatic (legacy checkpoint without length)")
             self._invalidate_cache()
 
             dev_name = "GPU" if device == "cuda" else "CPU"

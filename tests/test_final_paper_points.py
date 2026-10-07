@@ -34,6 +34,12 @@ class FinalPaperPointTests(unittest.TestCase):
         values.update(kwargs)
         return WaveformConfig(**values)
 
+    def test_sample_length_default_and_validation(self):
+        self.assertEqual(TrainerThread([], ['A', 'B']).TARGET_LENGTH, 2048)
+        self.assertEqual(TrainerThread([], ['A', 'B'], sample_length=4096).TARGET_LENGTH, 4096)
+        with self.assertRaises(ValueError):
+            TrainerThread([], ['A', 'B'], sample_length=0)
+
     def test_lora_lengths_power_seed_and_spreading_factor_range(self):
         for sf in range(7, 13):
             cfg = self.config(M=sf, Tsymb=3.5e-6)
@@ -94,8 +100,10 @@ class FinalPaperPointTests(unittest.TestCase):
             next(b for b in buttons if "Save to Dataset Manager" in b.text()).click()
         error.assert_not_called()
         warning.assert_not_called()
-        self.assertEqual(manager.scan()[0]["generator"], "python")
-        self.assertEqual(manager.scan()[0]["modulation"], "LoRa")
+        self.assertEqual(manager.scan(), [])
+        saved = DatasetManager(manager.datasets_dir / tab.dataset_name_edit.text()).scan()
+        self.assertEqual(saved[0]["generator"], "python")
+        self.assertEqual(saved[0]["modulation"], "LoRa")
 
     def test_normalization_all_layouts_scale_invariance_and_zero(self):
         for iq, channels in ((False, 1), (True, 2), (False, 3), (True, 6)):
@@ -122,8 +130,8 @@ class FinalPaperPointTests(unittest.TestCase):
                 np.save(path, raw * scale)
                 files.append((str(path), i % 2))
             worker = TrainerThread(files, ["A", "B"], model_name="TinyConv", epochs=1,
-                                   batch_size=2, save_dir=str(self.root / layout), seed=42)
-            worker.TARGET_LENGTH = 32
+                                   batch_size=2, save_dir=str(self.root / layout), seed=42,
+                                   sample_length=32)
             paths = []
             worker.finished.connect(paths.append)
             with patch("mixedsignal_gui.backend.trainer.normalize_model_input", wraps=normalize_model_input) as normalizer:
@@ -140,6 +148,7 @@ class FinalPaperPointTests(unittest.TestCase):
             with patch.object(batch, "_device", return_value="cpu"):
                 batch._load_model(paths[0])
             self.assertIsNotNone(batch.model)
+            self.assertEqual(batch.sample_length_label.text(), "Sample Length: 32 (checkpoint)")
             self.assertEqual(batch.model_metadata["power_normalization"], meta["power_normalization"])
             batch._build_eval_tensors([raw, raw * 10], [0, 1])
             np.testing.assert_allclose(batch.eval_data.numpy(), np.repeat(expected, 2, axis=0), atol=2e-7)
@@ -148,6 +157,7 @@ class FinalPaperPointTests(unittest.TestCase):
             with patch.object(single, "get_device", return_value="cpu"):
                 single._do_load_model(paths[0])
             self.assertIsNotNone(single.model)
+            self.assertEqual(single.sample_length_label.text(), "Sample Length: 32 (checkpoint)")
             received = []
             hook = single.model.register_forward_pre_hook(lambda _, args: received.append(args[0].cpu().numpy().copy()))
             self.addCleanup(hook.remove)

@@ -66,8 +66,13 @@ class TrainerThread(QThread):
     def __init__(self, file_label_pairs, labels, model_name='SimpleCNN', epochs=10,
                  batch_size=32, lr=0.001, val_split=0.2,
                  weight_decay=1e-4, label_smoothing=0.1, grad_clip=1.0,
-                 model_hparams=None, model_plugin_path=None, save_dir=None, device='cpu', seed=None):
+                 model_hparams=None, model_plugin_path=None, save_dir=None, device='cpu', seed=None,
+                 sample_length=None):
         super().__init__()
+        if sample_length is not None:
+            if int(sample_length) <= 0:
+                raise ValueError("Sample length must be positive.")
+            self.TARGET_LENGTH = int(sample_length)
         self.file_label_pairs = list(file_label_pairs)
         self.labels = list(labels)
         self.model_name = model_name
@@ -222,7 +227,7 @@ class TrainerThread(QThread):
             isinstance(a, np.ndarray) and a.ndim == 2 for a in X_list
         )
 
-        # Use fixed target length to match notebook preprocessing (2048)
+        # Pad/truncate to the selected length (2048 by default).
         # Raw waveform files can be very long (e.g. 98304); passing them
         # untruncated makes convolutions ~24x slower than intended.
         target_len = self.TARGET_LENGTH

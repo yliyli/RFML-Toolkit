@@ -29,6 +29,20 @@ import numpy as np
 _REQUIRED_KEYS = {"name", "source", "fs", "samples"}
 
 
+def dataset_folder_path(root, name):
+    """Validate a user-supplied immediate subfolder name without creating it."""
+    name = name.strip()
+    if not name or name in ('.', '..') or any(c in name for c in '/\\\0:'):
+        raise ValueError("Enter a folder name, not a path (no /, \\, or colon).")
+    root = Path(root).resolve()
+    target = root / name
+    if target.resolve().parent != root:
+        raise ValueError("The dataset folder must stay inside the selected data folder.")
+    if target.exists() and not target.is_dir():
+        raise ValueError("That name already belongs to a file.")
+    return target
+
+
 def _validate(meta: dict) -> bool:
     return _REQUIRED_KEYS.issubset(meta.keys())
 

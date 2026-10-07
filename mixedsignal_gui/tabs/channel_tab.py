@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFileD
                                QHeaderView, QSlider, QGridLayout, QComboBox,
                                QDoubleSpinBox, QSpinBox, QStackedWidget, QMessageBox,
                                QButtonGroup, QCheckBox, QScrollArea, QProgressDialog,
-                               QListWidget, QInputDialog)
+                               QListWidget, QInputDialog, QLineEdit)
 from PySide6.QtCore import Qt, QSettings
 
 from PySide6.QtGui import QPalette, QColor
@@ -23,7 +23,7 @@ from mixedsignal_gui.backend.augmentation import (AugmentationPipeline, AWGNAugm
 from mixedsignal_gui.backend.parameter_range import ParameterRange
 from mixedsignal_gui.backend.experiment_settings import experiment_seed
 from mixedsignal_gui.backend.bulk_augmentation import BulkAugmentationThread
-from mixedsignal_gui.backend.dataset_manager import DatasetManager
+from mixedsignal_gui.backend.dataset_manager import DatasetManager, dataset_folder_path
 from mixedsignal_gui.backend.channel_bank import ChannelBank, BIN_DTYPES, DOMAINS
 from mixedsignal_gui.sionna_widget.scenes import available_scenes
 import numpy as np
@@ -198,6 +198,10 @@ class ChannelNoiseTab(QWidget):
         layout.addWidget(self.save_augmented_btn)
 
         # Bulk Apply Button
+        layout.addWidget(QLabel("Augmentation Folder Name"))
+        self.augmentation_name_edit = QLineEdit(f"augmented_{datetime.now():%Y%m%d_%H%M%S}")
+        self.augmentation_name_edit.setToolTip("All augmentation saves go in this subfolder of the Settings Data folder, beside generated datasets. Use a new name for each bulk run.")
+        layout.addWidget(self.augmentation_name_edit)
         bulk_btn = QPushButton("Apply to a Dataset Folder")
         bulk_btn.clicked.connect(self.apply_to_all_in_folder)
         layout.addWidget(bulk_btn)
@@ -997,14 +1001,14 @@ class ChannelNoiseTab(QWidget):
         ant_grid.addWidget(QLabel("TX Rows"), 0, 0)
         self.rt_tx_ant_rows = QSpinBox()
         self.rt_tx_ant_rows.setRange(1, 16)
-        self.rt_tx_ant_rows.setValue(6)
+        self.rt_tx_ant_rows.setValue(1)
         self.rt_tx_ant_rows.valueChanged.connect(self._rt_push_antennas)
         ant_grid.addWidget(self.rt_tx_ant_rows, 0, 1)
 
         ant_grid.addWidget(QLabel("TX Cols"), 1, 0)
         self.rt_tx_ant_cols = QSpinBox()
         self.rt_tx_ant_cols.setRange(1, 16)
-        self.rt_tx_ant_cols.setValue(6)
+        self.rt_tx_ant_cols.setValue(1)
         self.rt_tx_ant_cols.valueChanged.connect(self._rt_push_antennas)
         ant_grid.addWidget(self.rt_tx_ant_cols, 1, 1)
 
@@ -1023,14 +1027,14 @@ class ChannelNoiseTab(QWidget):
         ant_grid.addWidget(QLabel("RX Rows"), 4, 0)
         self.rt_rx_ant_rows = QSpinBox()
         self.rt_rx_ant_rows.setRange(1, 16)
-        self.rt_rx_ant_rows.setValue(6)
+        self.rt_rx_ant_rows.setValue(1)
         self.rt_rx_ant_rows.valueChanged.connect(self._rt_push_antennas)
         ant_grid.addWidget(self.rt_rx_ant_rows, 4, 1)
 
         ant_grid.addWidget(QLabel("RX Cols"), 5, 0)
         self.rt_rx_ant_cols = QSpinBox()
         self.rt_rx_ant_cols.setRange(1, 16)
-        self.rt_rx_ant_cols.setValue(6)
+        self.rt_rx_ant_cols.setValue(1)
         self.rt_rx_ant_cols.valueChanged.connect(self._rt_push_antennas)
         ant_grid.addWidget(self.rt_rx_ant_cols, 5, 1)
 
@@ -1639,7 +1643,7 @@ class ChannelNoiseTab(QWidget):
 
     def on_dataset_changed(self, name: str):
         if name and name != "No datasets found":
-            entry = self.dataset_manager.get_by_name(name)
+            entry = getattr(self, '_dataset_entries', {}).get(name)
             if entry:
                 self._active_entry = entry
                 self.display_original_signal()
@@ -1726,13 +1730,20 @@ class ChannelNoiseTab(QWidget):
         self.dataset_combo.blockSignals(True)
         self.dataset_combo.clear()
         entries = self.dataset_manager.scan()
+        root = self.dataset_manager.datasets_dir
+        self._dataset_entries = {e['name']: e for e in entries}
+        for folder in sorted({p.parent for p in root.rglob('*.json') if p.parent != root}):
+            for entry in DatasetManager(folder).scan():
+                self._dataset_entries[f"{folder.relative_to(root)}/{entry['name']}"] = entry
 
-        if entries:
-            names = [e['name'] for e in entries]
+        if self._dataset_entries:
+            names = list(self._dataset_entries)
             self.dataset_combo.addItems(names)
             # Re-select active entry if it still exists
-            if self._active_entry and self._active_entry['name'] in names:
-                self.dataset_combo.setCurrentText(self._active_entry['name'])
+            active = next((name for name, entry in self._dataset_entries.items()
+                           if self._active_entry and entry['_npy_path'] == self._active_entry['_npy_path']), None)
+            if active:
+                self.dataset_combo.setCurrentText(active)
             else:
                 self.dataset_combo.setCurrentIndex(0)
         else:
@@ -2035,9 +2046,15 @@ class ChannelNoiseTab(QWidget):
             return
 
         snapshot = self._last_augmentation
+        try:
+            destination = DatasetManager(dataset_folder_path(self.dataset_manager.datasets_dir,
+                                                             self.augmentation_name_edit.text()))
+        except ValueError as exc:
+            QMessageBox.warning(self, "Invalid Augmentation Folder Name", str(exc))
+            return
         entry = snapshot['source_entry']
         base_name = entry['name'] if entry else "dataset"
-        aug_name = self.dataset_manager._unique_name(f"{base_name}_augmented")
+        aug_name = destination._unique_name(f"{base_name}_augmented")
 
         # Build augmentation metadata on top of original entry
         metadata = copy.deepcopy(entry) if entry else {}
@@ -2061,24 +2078,24 @@ class ChannelNoiseTab(QWidget):
             num_ant = signal.shape[0]
             metadata['num_channels'] = num_ant
             for i in range(num_ant):
-                ant_name = self.dataset_manager._unique_name(f"{base_name}_augmented_ant{i}")
+                ant_name = destination._unique_name(f"{base_name}_augmented_ant{i}")
                 meta_i = dict(metadata)
                 meta_i['antenna_index'] = i
                 meta_i['channel_group'] = aug_name
-                saved = self.dataset_manager.save(ant_name, signal[i], meta_i)
+                saved = destination.save(ant_name, signal[i], meta_i)
             self._active_entry = saved
             self.refresh_dataset_list()
             print(f"[ChannelTab] Saved {num_ant} per-antenna datasets: {aug_name}_ant*")
         elif save_mode == "All Antennas (Stacked)" and signal.ndim == 2:
             metadata['num_channels'] = signal.shape[0]
             metadata['signal_shape'] = list(signal.shape)
-            saved = self.dataset_manager.save(aug_name, signal, metadata)
+            saved = destination.save(aug_name, signal, metadata)
             self._active_entry = saved
             self.refresh_dataset_list()
             print(f"[ChannelTab] Saved stacked multi-channel dataset: {aug_name} {signal.shape}")
         else:
             # Single antenna or 1D signal — original behavior
-            saved = self.dataset_manager.save(aug_name, signal, metadata)
+            saved = destination.save(aug_name, signal, metadata)
             self._active_entry = saved
             self.refresh_dataset_list()
             print(f"[ChannelTab] Saved augmented dataset: {aug_name}")
@@ -2102,8 +2119,14 @@ class ChannelNoiseTab(QWidget):
                                     "The selected folder contains no datasets.")
             return
 
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        dest_dir = os.path.join(folder, f"augmented_{ts}")
+        try:
+            dest_dir = str(dataset_folder_path(self.dataset_manager.datasets_dir,
+                                              self.augmentation_name_edit.text()))
+            if os.path.exists(dest_dir):
+                raise ValueError("That output folder already exists. Enter a new Augmentation Folder Name.")
+        except ValueError as exc:
+            QMessageBox.warning(self, "Invalid Augmentation Folder Name", str(exc))
+            return
 
         reply = QMessageBox.question(
             self, "Bulk Augmentation",

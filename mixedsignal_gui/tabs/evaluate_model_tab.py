@@ -15,6 +15,7 @@ from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as Navigation
 from mixedsignal_gui.widgets.waveform_plots import PlottingWidget, FreqDomainPlot, IQDomainPlot, SpectrogramPlot, _theme_toolbar
 from mixedsignal_gui.widgets.toggle_switch import ToggleSwitch
 from mixedsignal_gui.widgets.wheel_filter import install_wheel_blocker
+from mixedsignal_gui.widgets.hover_help import HoverHelpButton, CHECKPOINT_HELP
 from mixedsignal_gui.widgets.modulation_utils import (mark_unavailable_modulations,
                                                      selected_modulation)
 from mixedsignal_gui.backend.augmentation import (AugmentationPipeline, AWGNAugmentation,
@@ -127,12 +128,17 @@ class EvaluateModelTab(QWidget):
         self.load_model_btn = QPushButton("Load Model (.pth)")
         self.load_model_btn.clicked.connect(self.load_model)
         model_btn_row.addWidget(self.load_model_btn)
+        self.model_help_btn = HoverHelpButton(CHECKPOINT_HELP, self)
+        model_btn_row.addWidget(self.model_help_btn)
         layout.addLayout(model_btn_row)
 
         self.model_label = QLabel("No model loaded")
         self.model_label.setProperty("class", "stat-label")
         self.model_label.setWordWrap(True)
         layout.addWidget(self.model_label)
+        self.sample_length_label = QLabel("Sample Length: 2048 (default; no model loaded)")
+        self.sample_length_label.setToolTip("Fixed by the loaded checkpoint; inputs are padded or truncated to match.")
+        layout.addWidget(self.sample_length_label)
 
         # --- Waveform params (mirrors WaveformSelectionTab) ---
         layout.addSpacing(8)
@@ -601,6 +607,8 @@ class EvaluateModelTab(QWidget):
 
             self.model = model
             self.model_path = filepath
+            length = int((self.model_metadata or {}).get('signal_length') or TrainerThread.TARGET_LENGTH)
+            self.sample_length_label.setText(f"Sample Length: {length} (checkpoint)")
 
             device_name = "GPU" if device == 'cuda' else "CPU"
             info = f"Loaded: {os.path.basename(filepath)} ({model_name}, {num_classes} classes) on {device_name}"

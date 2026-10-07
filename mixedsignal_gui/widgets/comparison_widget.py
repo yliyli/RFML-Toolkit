@@ -362,12 +362,17 @@ class ComparisonWidget(QWidget):
             f_psd, psd_clean = signal.welch(clean, fs, nperseg=nperseg_psd)
             _, psd_aug = signal.welch(augmented, fs, nperseg=nperseg_psd)
 
-        ax.semilogy(f_psd / 1e6, psd_clean, 'b-', linewidth=2, label='Clean')
-        ax.semilogy(f_psd / 1e6, psd_aug, 'r-', linewidth=1, alpha=0.7, label='Augmented')
+        # Display only: common unit reference, no per-curve normalization.
+        # Floor exact zeros to keep the logarithm finite. Samples are unchanged.
+        floor = np.finfo(np.float64).tiny
+        ax.plot(f_psd / 1e6, 10 * np.log10(np.maximum(psd_clean, floor)),
+                'b-', linewidth=2, label='Clean')
+        ax.plot(f_psd / 1e6, 10 * np.log10(np.maximum(psd_aug, floor)),
+                'r-', linewidth=1, alpha=0.7, label='Augmented')
 
         ax.set_title('Power Spectrum: Clean vs Augmented')
         ax.set_xlabel('Frequency (MHz)')
-        ax.set_ylabel('Power Spectral Density')
+        ax.set_ylabel('PSD (dB re 1 sample-unit²/Hz)\nUncalibrated')
         ax.legend()
         ax.grid(True, alpha=0.3)
 
