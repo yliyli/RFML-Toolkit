@@ -521,11 +521,11 @@ class WaveformSelectionTab(QWidget):
         self.dataset_name_edit.setToolTip("Subfolder of the Data folder in Settings. Saves with the same name add examples to that folder.")
         layout.addWidget(self.dataset_name_edit)
 
-        generate_btn = QPushButton("▶ Generate Dataset")
+        generate_btn = QPushButton("▶ Generate a Sample")
         generate_btn.clicked.connect(self.generate_dataset)
         layout.addWidget(generate_btn)
 
-        save_btn = QPushButton("💾 Save to Dataset Manager")
+        save_btn = QPushButton("💾 Save Sample to Dataset")
         save_btn.clicked.connect(self.save_to_dataset_manager)
         layout.addWidget(save_btn)
         
@@ -544,7 +544,7 @@ class WaveformSelectionTab(QWidget):
         layout.addLayout(batch_layout)
         
         # Batch generate button
-        batch_btn = QPushButton("📦 Batch Generate")
+        batch_btn = QPushButton("📦 Generate a Dataset (Batch)")
         batch_btn.clicked.connect(self.batch_generate)
         
         # Quick test data button
@@ -720,7 +720,7 @@ class WaveformSelectionTab(QWidget):
     def save_to_dataset_manager(self):
         """Save the currently generated waveform to the datasets folder."""
         if self.current_data is None:
-            print("✗ No waveform generated yet. Generate a dataset first.")
+            print("✗ No waveform generated yet. Generate a sample first.")
             return
 
         destination = self._generation_destination()
@@ -748,7 +748,7 @@ class WaveformSelectionTab(QWidget):
         }
 
         destination.save(name, self.current_data, metadata)
-        print(f"✓ Saved dataset: {name}")
+        print(f"✓ Saved sample: {name}")
 
     def _generation_destination(self):
         try:
@@ -877,7 +877,7 @@ class WaveformSelectionTab(QWidget):
                         failures.setdefault(modulation, str(e))
 
         total_saved = count_saved
-        print(f"Batch complete: {total_saved}/{total} datasets saved")
+        print(f"Batch complete: {total_saved}/{total} samples saved")
 
         # Report in the GUI too.  Previously the only sign that a class had
         # failed was a line on stdout, so a run that quietly dropped WiFi/LTE/

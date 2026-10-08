@@ -101,7 +101,7 @@ class ChannelNoiseTab(QWidget):
         # Dataset Selection
         dataset_selection = QVBoxLayout()
         dataset_selection.setSpacing(4)
-        dataset_label = QLabel("Select Dataset")
+        dataset_label = QLabel("Select a Sample")
         dataset_label.setProperty("class", "section-title")
         dataset_selection.addWidget(dataset_label)
 
@@ -111,11 +111,11 @@ class ChannelNoiseTab(QWidget):
 
         dataset_buttons = QHBoxLayout()
         dataset_buttons.setSpacing(6)
-        upload_btn = QPushButton("Upload Dataset")
+        upload_btn = QPushButton("Import a Sample")
         upload_btn.clicked.connect(self.upload_dataset)
         dataset_buttons.addWidget(upload_btn)
 
-        refresh_btn = QPushButton("Refresh Datasets")
+        refresh_btn = QPushButton("Refresh Samples")
         refresh_btn.clicked.connect(self.refresh_dataset_list)
         dataset_buttons.addWidget(refresh_btn)
         dataset_selection.addLayout(dataset_buttons)
@@ -187,12 +187,12 @@ class ChannelNoiseTab(QWidget):
         layout.addWidget(self.rt_status_label)
 
         # Apply Augmentation Button
-        apply_btn = QPushButton("Apply Augmentations")
+        apply_btn = QPushButton("Augment a Sample")
         apply_btn.setObjectName("primaryButton")
         apply_btn.clicked.connect(self.apply_augmentations)
         layout.addWidget(apply_btn)
 
-        self.save_augmented_btn = QPushButton("Save Augmented Dataset")
+        self.save_augmented_btn = QPushButton("Save Augmented Sample")
         self.save_augmented_btn.setEnabled(False)
         self.save_augmented_btn.clicked.connect(self.save_augmented_dataset)
         layout.addWidget(self.save_augmented_btn)
@@ -202,7 +202,7 @@ class ChannelNoiseTab(QWidget):
         self.augmentation_name_edit = QLineEdit(f"augmented_{datetime.now():%Y%m%d_%H%M%S}")
         self.augmentation_name_edit.setToolTip("All augmentation saves go in this subfolder of the Settings Data folder, beside generated datasets. Use a new name for each bulk run.")
         layout.addWidget(self.augmentation_name_edit)
-        bulk_btn = QPushButton("Apply to a Dataset Folder")
+        bulk_btn = QPushButton("Augment a Dataset Folder")
         bulk_btn.clicked.connect(self.apply_to_all_in_folder)
         layout.addWidget(bulk_btn)
 
@@ -1693,7 +1693,7 @@ class ChannelNoiseTab(QWidget):
             default_dir = ""
         
         filepath, _ = QFileDialog.getOpenFileName(
-            self, "Import External Dataset", default_dir, "NumPy Files (*.npy);;All Files (*)"
+            self, "Import a Sample", default_dir, "NumPy Files (*.npy);;All Files (*)"
         )
         if not filepath:
             return
@@ -1702,7 +1702,7 @@ class ChannelNoiseTab(QWidget):
             from PySide6.QtWidgets import QInputDialog
             fs_str, ok = QInputDialog.getText(
                 self, "Sample Rate",
-                "Enter sample rate (Hz) for this dataset:",
+                "Enter sample rate (Hz) for this sample:",
                 text="8000000"
             )
             if not ok:
@@ -1833,7 +1833,7 @@ class ChannelNoiseTab(QWidget):
 
     def apply_augmentations(self):
         if not hasattr(self, 'clean_signal'):
-            print("No dataset selected to augment.")
+            print("No sample selected to augment.")
             return
 
         signal = self.clean_signal
@@ -2042,7 +2042,7 @@ class ChannelNoiseTab(QWidget):
 
     def save_augmented_dataset(self):
         if not hasattr(self, '_last_augmentation'):
-            print("[ChannelTab] No augmented signal to save. Apply augmentations first.")
+            print("[ChannelTab] No augmented sample to save. Click Augment a Sample first.")
             return
 
         snapshot = self._last_augmentation
@@ -2098,7 +2098,7 @@ class ChannelNoiseTab(QWidget):
             saved = destination.save(aug_name, signal, metadata)
             self._active_entry = saved
             self.refresh_dataset_list()
-            print(f"[ChannelTab] Saved augmented dataset: {aug_name}")
+            print(f"[ChannelTab] Saved augmented sample: {aug_name}")
 
     # ------------------------------------------------------------------
     # Bulk augmentation

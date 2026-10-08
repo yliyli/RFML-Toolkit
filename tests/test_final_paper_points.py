@@ -96,8 +96,8 @@ class FinalPaperPointTests(unittest.TestCase):
              patch("mixedsignal_gui.tabs.waveform_tab.QMessageBox.critical") as error, \
              patch("mixedsignal_gui.tabs.waveform_tab.QMessageBox.warning") as warning:
             buttons = tab.findChildren(QPushButton)
-            next(b for b in buttons if "Generate Dataset" in b.text()).click()
-            next(b for b in buttons if "Save to Dataset Manager" in b.text()).click()
+            next(b for b in buttons if "Generate a Sample" in b.text()).click()
+            next(b for b in buttons if "Save Sample to Dataset" in b.text()).click()
         error.assert_not_called()
         warning.assert_not_called()
         self.assertEqual(manager.scan(), [])

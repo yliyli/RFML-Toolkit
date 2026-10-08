@@ -31,7 +31,8 @@ class ComparisonPSDTests(unittest.TestCase):
                 np.testing.assert_array_equal(clean, original[0])
                 np.testing.assert_array_equal(augmented, original[1])
                 self.assertEqual(ax.get_yscale(), 'linear')
-                self.assertIn('Uncalibrated', ax.get_ylabel())
+                self.assertEqual(ax.get_ylabel(), 'PSD (dB/Hz)')
+                self.assertIn('uncalibrated', ax.get_title())
                 self.assertNotIn('dBm', ax.get_ylabel())
 
     def test_zero_signals_have_finite_display(self):

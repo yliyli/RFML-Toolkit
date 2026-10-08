@@ -345,11 +345,9 @@ class SionnaWidget(QWidget):
         except Exception as e:
             print(f"Warning: could not clear viewport paths: {e}")
 
-        QApplication.setOverrideCursor(Qt.WaitCursor)
-        try:
-            ok = self._engine.load_scene(path)
-        finally:
-            QApplication.restoreOverrideCursor()
+        # macOS Qt can crash in native cursor image registration when this
+        # is called from the scene combo box. Do not install a busy cursor.
+        ok = self._engine.load_scene(path)
 
         if ok:
             if self._controls is not None:
@@ -424,7 +422,7 @@ class SionnaWidget(QWidget):
     def compute_paths(self):
         """Run path computation on the main thread (drjit requirement).
 
-        Uses a busy cursor while computing.  Emits ``paths_computed`` and
+        Shows computation state in the controls. Emits ``paths_computed`` and
         ``augmentation_ready`` on success, or ``error_occurred`` on failure.
         """
         if self._computing:
@@ -437,7 +435,6 @@ class SionnaWidget(QWidget):
         if self._controls is not None:
             self._controls.compute_btn.setEnabled(False)
             self._controls.compute_btn.setText("Computing...")
-        QApplication.setOverrideCursor(Qt.WaitCursor)
         QApplication.processEvents()
 
         # Use a single-shot timer to let the UI update before blocking
@@ -458,7 +455,6 @@ class SionnaWidget(QWidget):
             if self._controls is not None:
                 self._controls.compute_btn.setEnabled(True)
                 self._controls.compute_btn.setText("Compute Paths")
-            QApplication.restoreOverrideCursor()
 
     def visualize_pipeline(self, stage_names: list, stage_signals: list,
                            fs: float):

@@ -370,9 +370,9 @@ class ComparisonWidget(QWidget):
         ax.plot(f_psd / 1e6, 10 * np.log10(np.maximum(psd_aug, floor)),
                 'r-', linewidth=1, alpha=0.7, label='Augmented')
 
-        ax.set_title('Power Spectrum: Clean vs Augmented')
+        ax.set_title('Power Spectrum (uncalibrated)')
         ax.set_xlabel('Frequency (MHz)')
-        ax.set_ylabel('PSD (dB re 1 sample-unit²/Hz)\nUncalibrated')
+        ax.set_ylabel('PSD (dB/Hz)')
         ax.legend()
         ax.grid(True, alpha=0.3)
 

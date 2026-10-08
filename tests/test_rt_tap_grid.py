@@ -6,7 +6,7 @@ import subprocess
 import sys
 from types import SimpleNamespace
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 
@@ -20,6 +20,21 @@ class RTTapGridTests(unittest.TestCase):
         from mixedsignal_gui.sionna_widget.widget import SionnaWidget
         cls.engine_class = SimpleSimulationEngine
         cls.widget_class = SionnaWidget
+
+    def test_scene_switch_does_not_install_native_busy_cursor(self):
+        harness = SimpleNamespace(
+            _computing=True, _viewport=MagicMock(), _engine=MagicMock(),
+            _controls=None, _sync_viewport_markers=MagicMock(),
+            scene_loaded=MagicMock(), error_occurred=MagicMock())
+        with patch("mixedsignal_gui.sionna_widget.widget.QApplication") as app:
+            for success in (True, False):
+                harness._engine.load_scene.return_value = success
+                self.widget_class.load_scene(harness, "scene.xml")
+                self.assertFalse(harness._computing)
+            app.setOverrideCursor.assert_not_called()
+            app.restoreOverrideCursor.assert_not_called()
+        harness.scene_loaded.emit.assert_called_once_with("scene.xml")
+        harness.error_occurred.emit.assert_called_once_with("Failed to load scene: scene.xml")
 
     def test_known_delay_stays_fixed_when_sample_rate_changes(self):
         engine = self.engine_class()

@@ -60,7 +60,7 @@ class ChannelProvenanceTests(unittest.TestCase):
         return DatasetManager(folder).scan() if folder.exists() else []
 
     def test_save_button_requires_successful_apply(self):
-        self.assertEqual(self.tab.save_augmented_btn.text(), "Save Augmented Dataset")
+        self.assertEqual(self.tab.save_augmented_btn.text(), "Save Augmented Sample")
         self.assertFalse(self.tab.save_augmented_btn.isHidden())
         self.assertFalse(self.tab.save_augmented_btn.isEnabled())
         self.tab.save_augmented_btn.click()

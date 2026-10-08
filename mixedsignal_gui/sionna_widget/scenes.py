@@ -9,6 +9,7 @@ carrier frequency.  The registry is UI-free so both
 
 from pathlib import Path
 from typing import Any, Dict, List
+import xml.etree.ElementTree as ET
 
 _ROOT = Path(__file__).parent
 
@@ -59,5 +60,17 @@ BUNDLED_SCENES: List[Dict[str, Any]] = [
 
 
 def available_scenes() -> List[Dict[str, Any]]:
-    """Return the bundled scenes whose XML is actually present on disk."""
-    return [s for s in BUNDLED_SCENES if s["path"].is_file()]
+    """Only offer scenes with readable XML and all referenced file assets."""
+    return [s for s in BUNDLED_SCENES if _scene_assets_present(s["path"])]
+
+
+def _scene_assets_present(path: Path) -> bool:
+    try:
+        root = ET.parse(path).getroot()
+        return all(
+            (path.parent / element.attrib["value"]).is_file()
+            for element in root.iter()
+            if element.attrib.get("name") == "filename"
+        )
+    except (OSError, ET.ParseError, KeyError):
+        return False

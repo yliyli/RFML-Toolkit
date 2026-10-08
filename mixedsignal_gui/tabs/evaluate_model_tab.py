@@ -247,7 +247,7 @@ class EvaluateModelTab(QWidget):
 
         # --- Action buttons ---
         layout.addSpacing(8)
-        self.generate_btn = QPushButton("▶ Generate & Classify")
+        self.generate_btn = QPushButton("▶ Generate a Sample && Classify")
         self.generate_btn.setObjectName("primaryButton")
         self.generate_btn.setMinimumHeight(36)
         self.generate_btn.clicked.connect(self.generate_and_classify)
@@ -258,7 +258,7 @@ class EvaluateModelTab(QWidget):
         # come from disk.  Without this the tab can only be exercised on signals
         # the toolbox produced itself, which is the one case a field evaluation
         # is not interested in.
-        self.import_btn = QPushButton("Import Waveform && Classify")
+        self.import_btn = QPushButton("Import a Sample && Classify")
         self.import_btn.setMinimumHeight(32)
         self.import_btn.clicked.connect(self.import_and_classify)
         layout.addWidget(self.import_btn)
@@ -457,7 +457,7 @@ class EvaluateModelTab(QWidget):
 
         # --- Apply & Classify ---
         layout.addSpacing(8)
-        self.ch_apply_btn = QPushButton("▶ Apply Impairments & Classify")
+        self.ch_apply_btn = QPushButton("▶ Augment a Sample && Classify")
         self.ch_apply_btn.setObjectName("primaryButton")
         self.ch_apply_btn.setMinimumHeight(36)
         self.ch_apply_btn.clicked.connect(self._channel_test_classify)
