@@ -2,7 +2,7 @@
 
 **Signal Generation & Classification Dashboard**
 
-A PySide6-based graphical application for generating digital communication waveforms, applying channel models and noise, training machine learning models, and performing inference.
+A PySide6-based application connecting waveform generation, channel-aware augmentation, PyTorch training, and evaluation on generated or recorded I/Q. Interchangeable waveform, channel, and learning components share NumPy samples and experiment metadata for reproducible RFML experimentation.
 
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -11,11 +11,12 @@ A PySide6-based graphical application for generating digital communication wavef
 
 ## Features
 
-- **Waveform Selection** – Choose modulation types (FSK, PAM, FHSS, etc.) and parameters. Generation routines can call MATLAB functions when the MATLAB Engine API is available.
-- **Channel & Noise** – Apply channel models and additive noise to generated signals.
-- **ML Training** – Train classification models using TensorFlow or PyTorch on synthetic waveform datasets.
-- **Inference Results** – Visualize predictions, confusion matrices, and performance metrics.
-- **Dataset Management** – Save/load examples in `.npy`/`.json` pairs using a shared `DatasetManager`.
+- **Waveform Selection** – Generate individual samples or named datasets using Python and MATLAB waveform generators, including LoRa, Zigbee, and 5G NR.
+- **Channel & Noise** – Preview or batch-apply stochastic channels, Sionna ray tracing with bundled digital twins, or imported measured-response banks, with optional noise.
+- **ML Training** – Train built-in PyTorch architectures or trusted user-supplied Python plugins. Configure the input sample length (default 2048); checkpoints preserve class labels and preprocessing metadata.
+- **Inference Results / Evaluate Model** – Reload checkpoints, evaluate labeled datasets, or classify individual generated/imported samples; inspect confusion matrices, reports, ROC curves, and waveform views.
+- **Data Visualization** – Explore loaded datasets and export visualization coordinates and plots.
+- **Dataset Management & Exports** – Store named generated and augmented datasets as `.npy`/`.json` pairs, import external class folders or annotated SigMF recordings, and export plots/CSV results grouped by model/data pair.
 
 ---
 
@@ -23,40 +24,7 @@ A PySide6-based graphical application for generating digital communication wavef
 
 ### Quick Install
 
-```bash
-pip install rfml-toolkit
-```
-
-### Prerequisites
-
-- **Python 3.10 or higher** (tested with 3.11)
-- **(Optional) MATLAB** – For advanced waveform generation features
-  - [MATLAB](https://www.mathworks.com/products/matlab.html) R2021a or later
-  - [MATLAB Engine for Python](https://www.mathworks.com/help/matlab/matlab_external/install-the-matlab-engine-for-python.html)
-
-### Installing MATLAB Engine (Optional)
-
-If you want to use MATLAB-based waveform generation:
-
-1. **Find your MATLAB installation:**
-   ```bash
-   matlab -batch "disp(matlabroot)"
-   ```
-
-2. **Install the MATLAB Engine for Python:**
-   ```bash
-   # macOS/Linux
-   cd /Applications/MATLAB_R2023b.app/extern/engines/python
-   python setup.py install
-   
-   # Windows
-   cd "C:\Program Files\MATLAB\R2023b\extern\engines\python"
-   python setup.py install
-   ```
-
-   Replace `R2023b` with your MATLAB version.
-
-### Install from Source (for developers)
+For the current features described below, install from the repository:
 
 ```bash
 git clone https://github.com/yliyli/RFML-Toolkit.git
@@ -64,9 +32,22 @@ cd RFML-Toolkit
 pip install -e .
 ```
 
-For development dependencies:
+### Prerequisites
+
+- **Python 3.10 or higher** (the current local test environment uses 3.12; backend compatibility depends on installed releases)
+- **(Optional) MATLAB** – For advanced waveform generation features
+  - [MATLAB](https://www.mathworks.com/products/matlab.html) with the toolboxes required by the selected waveform family
+  - [MATLAB Engine for Python](https://www.mathworks.com/help/matlab/matlab_external/install-the-matlab-engine-for-python.html)
+
+### Installing MATLAB Engine (Optional)
+
+For MATLAB-based generation, follow the
+[MATLAB Engine installation instructions](https://www.mathworks.com/help/matlab/matlab_external/install-the-matlab-engine-for-python.html)
+for your installed MATLAB release and a supported Python version. Install the
+Engine into the same environment used to launch the GUI, then verify it:
+
 ```bash
-pip install -e ".[dev]"
+python -c "import matlab.engine; print('MATLAB Engine import succeeded')"
 ```
 
 ---
@@ -90,7 +71,9 @@ main()
 
 On the first launch, the application displays a multi-page setup wizard that:
 
-* Provides a **quick tour** of the four main tabs (waveform, channel, ML, inference)
+* Provides an introductory workflow tour; the current application has six tabs:
+  Waveform Selection, Channel & Noise, ML Training, Inference Results,
+  Evaluate Model, and Data Visualization
 * Lets you select folders for models and datasets
 * Detects available GPUs and allows CPU/GPU mode selection
 * Shows tips & tricks for navigation
@@ -110,9 +93,10 @@ Data folder in Settings. Choose the generated or augmented folder to load its
 direct .npy/JSON pairs, using metadata class labels and excluding held-out test
 entries. Load additional folders to merge examples under the same class names;
 already-loaded files are skipped. Subfolders are not automatically included.
-Generation still writes to the Data folder configured in Settings: select a
-named subfolder there for each experiment or train/test dataset. Loading a folder
-for training does not change that generation destination.
+Generation writes into **Dataset Folder Name** beneath the Settings Data folder.
+Augmentation writes into **Augmentation Folder Name** beneath that same root,
+beside the base dataset—not inside the selected source folder. Loading a folder
+for training does not change either save destination.
 **Import External Data** selects a parent folder with class-named subfolders:
 one `.npy`, `.npz`, or `.csv` per example. Complex IQ has shape `(N,)`;
 `(antennas, N)` denotes antenna channels, not a batch. Hover over the circled
@@ -126,7 +110,7 @@ unchanged as NumPy arrays with SigMF provenance in the shared dataset registry.
 `core:label` becomes the training class and `core:frequency` supplies the capture
 frequency. Use **Load Toolbox Datasets** for labeled training regions, or **Load from
 Dataset Registry** for evaluation. Unlabeled regions remain stored without an
-invented class. In **Evaluate Model → Import Waveform**, select a SigMF file and
+invented class. In **Evaluate Model → Import a Sample & Classify**, select a SigMF file and
 choose one region for plotting and single-waveform classification.
 Import does not automatically window a recording. Define labeled annotation
 regions with `core:sample_start`, `core:sample_count`, and `core:label` before
@@ -194,11 +178,17 @@ changing the batch-evaluation checkpoint to apply its input preprocessing.
 ### MATLAB Integration
 
 If MATLAB and the MATLAB Engine are installed, the app will automatically:
+
 - Start the MATLAB engine
 - Add `waveform_functions` to the MATLAB path
 - Enable MATLAB-based waveform generators
 
-If MATLAB is not available, the GUI will still launch with Python-based waveform generation, but some features will be disabled.
+Without MATLAB, Python generation supports PAM, QAM, PSK, FSK, FHSS, LFM,
+Barker, FMCW, and LoRa. WiFi, LTE, 5G NR, and Zigbee require MATLAB and the
+appropriate toolboxes. LoRa uses Python even when MATLAB is available.
+Standards-based generators contain fixed PHY configurations; generic `M` and
+`Tsymb` controls do not change every family. Zigbee uses the 2.4-GHz OQPSK PHY
+with a 2-Mchip/s chip rate.
 
 ---
 
@@ -214,7 +204,6 @@ mixedsignal_gui/
 │   ├── dataset_manager.py
 │   ├── generators.py
 │   ├── matlab_engine.py        # Wrapper for MATLAB Engine API
-│   ├── tf_models.py
 │   ├── torch_models.py
 │   ├── trainer.py
 │   ├── waveform_pipeline.py
@@ -223,10 +212,11 @@ mixedsignal_gui/
 ├── styles/                     # Stylesheet definitions
 ├── tabs/                       # UI tabs for each workflow step
 ├── waveform_functions/         # MATLAB scripts (added to path at runtime)
-├── resources/                  # UI resources and assets
-├── datasets/                   # Generated examples and metadata
-└── models/                     # Trained model snapshots
+└── resources/                  # UI resources and assets
 ```
+
+Dataset, checkpoint, and exported-result destinations are configured in
+**Settings → Paths**; they do not need to live inside the package directory.
 
 ---
 
@@ -242,8 +232,11 @@ mixedsignal_gui/
 ### Running Tests
 
 ```bash
-pytest
+QT_QPA_PLATFORM=offscreen python -m unittest discover -s tests -q
 ```
+
+Native scene rendering and hover interactions also need a desktop smoke check;
+headless tests are not a guarantee against GPU/OpenGL driver failures.
 
 ### Code Formatting
 
@@ -257,16 +250,19 @@ isort mixedsignal_gui/
 ## Dependencies
 
 Core dependencies:
+
 - PySide6 – Qt-based GUI framework
 - PyTorch – Deep learning framework
-- TensorFlow – Machine learning platform
-- Sionna – Link-level simulator
+- TensorFlow – Backend for channel components (classifier training uses PyTorch)
+- Sionna / Sionna RT – Communications and ray-tracing backends
 - NumPy – Numerical computing
 - Matplotlib – Plotting library
 - scikit-learn – Machine learning utilities
 - PyOpenGL – OpenGL bindings
 
-See `pyproject.toml` for the complete list.
+See `pyproject.toml` for declared dependencies. UMAP visualization additionally
+requires `umap-learn`. MATLAB Engine and MATLAB toolboxes are installed separately;
+backend releases and hardware support must be compatible with your environment.
 
 ---
 
@@ -280,6 +276,11 @@ See `pyproject.toml` for the complete list.
 - Reinstall the engine if needed (see Installation section above)
 
 ### GPU Not Detected
+
+The current training/inference device selector uses NVIDIA CUDA when **GPU** is
+selected and CUDA is available; otherwise it falls back to CPU. It does not yet
+select Apple's MPS backend, so choosing GPU on a Mac does not enable Metal
+acceleration. TensorFlow/Sionna device availability is a separate backend check.
 
 - For PyTorch: Check with `python -c "import torch; print(torch.cuda.is_available())"`
 - For TensorFlow: Check with `python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"`
@@ -299,7 +300,11 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Acknowledgements
 
+The camera-ready paper acknowledges NSF support under awards 2431961, 2526493,
+and 2112471, and OpenStreetMap contributors (ODbL) for map-derived scene data.
+
 This project makes use of:
+
 - [PySide6](https://doc.qt.io/qtforpython/) – Python bindings for Qt
 - [PyTorch](https://pytorch.org/) – Deep learning framework
 - [TensorFlow](https://www.tensorflow.org/) – Machine learning platform
@@ -310,13 +315,18 @@ This project makes use of:
 
 ## Citation
 
-If you use this software in your research, please cite:
+If you use this toolbox in research, cite the accompanying paper. This entry
+describes the camera-ready manuscript for the NRDZCOM8 workshop at IEEE MILCOM
+2026; add the published proceedings details and DOI when available.
 
 ```bibtex
-@software{rfml_toolkit,
-  author = {Maldei-Stumm, Nastasia},
-  title = {RFML Toolkit: Signal Generation & Classification Dashboard},
-  year = {2025},
+@unpublished{li2026rfmltoolbox,
+  author = {Li, Yiyang and Borda, Nicholas and Chae, Tony and Deng, Christopher
+            and Jayr, Amaury and Madan, Shivansh and Maldei-Stumm, Nastasia
+            and Xu, Matthew and Prabhu, Agastya and Chowdhury, Kaushik},
+  title = {An End-to-End {RFML} Toolbox for Channel-Aware Experimentation},
+  year = {2026},
+  note = {Camera-ready manuscript, NRDZCOM8 workshop at IEEE MILCOM 2026},
   url = {https://github.com/yliyli/RFML-Toolkit}
 }
 ```
